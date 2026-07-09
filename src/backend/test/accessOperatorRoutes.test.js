@@ -5,6 +5,8 @@ const express = require('express');
 const authPath = require.resolve('../middleware/auth');
 const setCommunityPath = require.resolve('../middleware/setCommunity');
 const dbPath = require.resolve('../db');
+const accessPreauthorizationControllerPath = require.resolve('../controllers/accessPreauthorizationController');
+const accessInvitationControllerPath = require.resolve('../controllers/accessInvitationController');
 
 function mockModule(path, exports) {
   require.cache[path] = {
@@ -18,6 +20,8 @@ function mockModule(path, exports) {
 function clearRoute(routePath, controllerPath) {
   delete require.cache[routePath];
   if (controllerPath) delete require.cache[controllerPath];
+  delete require.cache[accessPreauthorizationControllerPath];
+  delete require.cache[accessInvitationControllerPath];
   delete require.cache[authPath];
   delete require.cache[setCommunityPath];
   delete require.cache[dbPath];
@@ -71,6 +75,14 @@ async function requestRoute({ routeFile, controllerFile, controllerExports, role
   mockModule(setCommunityPath, communityNoop());
   mockModule(dbPath, dbMock());
   if (controllerPath) mockModule(controllerPath, controllerMock(controllerExports || {}));
+  if (routeFile === '../routes/accessPreauthorizations') {
+    if (controllerPath !== accessPreauthorizationControllerPath) {
+      mockModule(accessPreauthorizationControllerPath, controllerMock({}));
+    }
+    if (controllerPath !== accessInvitationControllerPath) {
+      mockModule(accessInvitationControllerPath, controllerMock({}));
+    }
+  }
 
   const router = require(routeFile);
   const app = express();
@@ -264,6 +276,36 @@ test('resident cannot access visitor preauthorizations', async () => {
     role: 'residente',
     method: 'GET',
     path: '/search?q=Ana',
+  });
+
+  assert.equal(result.status, 403);
+});
+
+test('access_operator cannot generate visitor digital invitations', async () => {
+  const result = await requestRoute({
+    routeFile: '../routes/accessPreauthorizations',
+    controllerFile: '../controllers/accessInvitationController',
+    controllerExports: {
+      create(req, res) { res.json({ ok: true }); },
+    },
+    role: 'access_operator',
+    method: 'POST',
+    path: '/1/invitations',
+  });
+
+  assert.equal(result.status, 403);
+});
+
+test('resident cannot access visitor digital invitations', async () => {
+  const result = await requestRoute({
+    routeFile: '../routes/accessPreauthorizations',
+    controllerFile: '../controllers/accessInvitationController',
+    controllerExports: {
+      list(req, res) { res.json({ ok: true }); },
+    },
+    role: 'residente',
+    method: 'GET',
+    path: '/1/invitations',
   });
 
   assert.equal(result.status, 403);

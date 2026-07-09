@@ -40,4 +40,13 @@ export const accessPreauthorizationService = {
   use(id) {
     return api.post(`/access-preauthorizations/${id}/use`);
   },
+  listInvitations(id) {
+    return api.get(`/access-preauthorizations/${id}/invitations`);
+  },
+  generateInvitation(id, data = {}) {
+    return api.post(`/access-preauthorizations/${id}/invitations`, data);
+  },
+  revokeInvitation(id, invitationId) {
+    return api.post(`/access-preauthorizations/${id}/invitations/${invitationId}/revoke`);
+  },
 };

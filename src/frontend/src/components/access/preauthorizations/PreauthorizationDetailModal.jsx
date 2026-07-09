@@ -1,4 +1,5 @@
 import t from '../../../theme';
+import DigitalInvitationPanel from './DigitalInvitationPanel';
 import PreauthorizationStatusChip from './PreauthorizationStatusChip';
 import { formatDateTime, getEffectiveStatus } from './preauthorizationUtils';
 
@@ -34,6 +35,7 @@ export default function PreauthorizationDetailModal({ item, saving, onClose, onC
             <span>{item.notes}</span>
           </div>
         )}
+        <DigitalInvitationPanel preauthorization={item} />
         <div style={styles.formActions}>
           {effectiveStatus === 'pending' && (
             <button type="button" onClick={() => onCancel(item)} disabled={saving} style={t.secondaryBtn}>
