@@ -8,10 +8,10 @@ const { logAudit } = require('../middleware/logAudit');
 const hc = require('../controllers/hierarchyController');
 
 // Tree
-router.get('/tree', authenticate, setCommunity, hc.tree);
+router.get('/tree', authenticate, authorize('admin', 'residente'), setCommunity, hc.tree);
 
 // Complexes
-router.get('/complexes', authenticate, setCommunity, hc.getComplexes);
+router.get('/complexes', authenticate, authorize('admin', 'residente'), setCommunity, hc.getComplexes);
 router.post('/complexes',
   authenticate, authorize('superadmin'), setCommunity,
   sanitize('name', 'address', 'access_code'),
@@ -31,7 +31,7 @@ router.delete('/complexes/:id',
 );
 
 // Buildings
-router.get('/buildings', authenticate, setCommunity, hc.getBuildings);
+router.get('/buildings', authenticate, authorize('admin', 'residente'), setCommunity, hc.getBuildings);
 router.post('/buildings',
   authenticate, authorize('admin'), setCommunity,
   sanitize('name', 'address'),
@@ -56,7 +56,7 @@ router.patch('/buildings/:id/move',
 );
 
 // Floors
-router.get('/floors', authenticate, setCommunity, hc.getFloors);
+router.get('/floors', authenticate, authorize('admin', 'residente'), setCommunity, hc.getFloors);
 router.post('/floors',
   authenticate, authorize('admin'), setCommunity,
   sanitize('name'),
@@ -82,7 +82,7 @@ router.patch('/floors/:id/move',
 
 // Units
 router.get('/units/search', authenticate, authorize('admin', 'access_operator'), setCommunity, hc.searchUnits);
-router.get('/units', authenticate, setCommunity, hc.getUnits);
+router.get('/units', authenticate, authorize('admin', 'residente'), setCommunity, hc.getUnits);
 router.post('/units',
   authenticate, authorize('admin'), setCommunity,
   sanitize('unit_code'),

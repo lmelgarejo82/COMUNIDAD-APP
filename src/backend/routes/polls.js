@@ -6,7 +6,7 @@ const { authorize } = require('../middleware/authorize');
 const { setCommunity } = require('../middleware/setCommunity');
 
 router.post('/', authenticate, authorize('admin'), setCommunity, pollsController.create);
-router.get('/', authenticate, setCommunity, pollsController.list);
-router.post('/:id/vote', authenticate, setCommunity, pollsController.vote);
+router.get('/', authenticate, authorize('admin', 'residente'), setCommunity, pollsController.list);
+router.post('/:id/vote', authenticate, authorize('admin', 'residente'), setCommunity, pollsController.vote);
 
 module.exports = router;

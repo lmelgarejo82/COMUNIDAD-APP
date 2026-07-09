@@ -24,6 +24,6 @@ const upload = multer({
 });
 
 router.post('/', authenticate, authorize('admin'), setCommunity, upload.single('file'), documentsController.upload);
-router.get('/', authenticate, setCommunity, documentsController.list);
+router.get('/', authenticate, authorize('admin', 'residente'), setCommunity, documentsController.list);
 
 module.exports = router;

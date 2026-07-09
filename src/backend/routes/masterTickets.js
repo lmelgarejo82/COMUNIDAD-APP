@@ -13,12 +13,12 @@ router.post('/',
 );
 
 router.get('/',
-  authenticate, setCommunity,
+  authenticate, authorize('admin'), setCommunity,
   ctrl.list
 );
 
 router.get('/:id',
-  authenticate, setCommunity,
+  authenticate, authorize('admin'), setCommunity,
   ctrl.getById
 );
 

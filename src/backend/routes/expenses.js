@@ -40,7 +40,7 @@ router.put('/unit/:unitExpenseId/confirm', authenticate, authorize('admin'), set
   expenseController.confirmPayment);
 
 router.get('/my', authenticate, authorize('residente'), setCommunity, expenseController.myExpenses);
-router.get('/', authenticate, setCommunity, expenseController.listMyExpenses);
+router.get('/', authenticate, authorize('admin', 'residente'), setCommunity, expenseController.listMyExpenses);
 router.put('/unit/:unitExpenseId/pay', authenticate, authorize('residente'), setCommunity, expenseController.submitPayment);
 
 module.exports = router;

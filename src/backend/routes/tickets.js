@@ -32,7 +32,7 @@ router.get('/my', authenticate, authorize('residente'), setCommunity, ticketCont
 router.put('/:id/status', authenticate, authorize('admin'), setCommunity,
   logAudit('UPDATE_TICKET_STATUS', (req) => ({ ticketId: req.params.id, status: req.body.status })),
   ticketController.updateStatus);
-router.put('/:id', authenticate, setCommunity, sanitize('title', 'description'), ticketController.update);
-router.post('/:id/reply', authenticate, setCommunity, sanitize('message'), upload.single('file'), ticketController.addReply);
+router.put('/:id', authenticate, authorize('admin', 'residente'), setCommunity, sanitize('title', 'description'), ticketController.update);
+router.post('/:id/reply', authenticate, authorize('admin', 'residente'), setCommunity, sanitize('message'), upload.single('file'), ticketController.addReply);
 
 module.exports = router;

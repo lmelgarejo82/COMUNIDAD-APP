@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
+const { authorize } = require('../middleware/authorize');
 const { pool } = require('../db');
 
-router.get('/admin/phone', authenticate, async (req, res) => {
+router.get('/admin/phone', authenticate, authorize('admin', 'residente'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       "SELECT phone FROM users WHERE community_id = $1 AND role = 'admin' AND phone IS NOT NULL LIMIT 1",
