@@ -8,6 +8,26 @@ function getOrganizationLabel(complex) {
   return complex.organization_name || complex.organizationName || 'Organización';
 }
 
+function normalizeLabel(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+export function getScopePath(complex) {
+  if (!complex) return 'Seleccionar complejo';
+  const labels = [
+    getOrganizationLabel(complex),
+    getCommunityLabel(complex),
+    complex.name || 'Complejo',
+  ].filter(Boolean);
+
+  return labels
+    .filter((label, index) => {
+      const normalized = normalizeLabel(label);
+      return normalized && labels.findIndex(item => normalizeLabel(item) === normalized) === index;
+    })
+    .join(' > ');
+}
+
 function getComplexType(complex) {
   if (complex.type && complex.type !== 'complex') return complex.type;
   return 'Complejo';
@@ -64,9 +84,7 @@ export default function ScopeSelector({
   if (!complexes || complexes.length === 0) return null;
 
   const isDark = variant === 'dark';
-  const organizationLabel = selected ? getOrganizationLabel(selected) : 'Organización';
-  const communityLabel = selected ? getCommunityLabel(selected) : 'Alcance';
-  const complexLabel = selected?.name || 'Seleccionar complejo';
+  const scopePath = getScopePath(selected);
 
   function selectComplex(id) {
     onChange(parseInt(id, 10));
@@ -75,7 +93,7 @@ export default function ScopeSelector({
   }
 
   return (
-    <div style={{ ...styles.wrap, minWidth: compact ? '100%' : 260 }}>
+    <div style={{ ...styles.wrap, minWidth: compact ? '100%' : 210, maxWidth: compact ? undefined : 300 }}>
       <button
         type="button"
         onClick={() => setOpen(prev => !prev)}
@@ -84,15 +102,15 @@ export default function ScopeSelector({
           ...(isDark ? styles.triggerDark : styles.triggerLight),
           width: compact ? '100%' : undefined,
         }}
-        title={`${organizationLabel} > ${communityLabel} > ${complexLabel}`}
+        title={scopePath}
       >
         <span style={styles.icon}>&#127970;</span>
         <span style={styles.textBlock}>
           <span style={{ ...styles.label, color: isDark ? 'rgba(255,255,255,0.72)' : '#6C757D' }}>
-            Alcance operativo
+            Alcance
           </span>
           <span style={{ ...styles.value, color: isDark ? '#FFFFFF' : '#212529' }}>
-            {organizationLabel} &gt; {communityLabel} &gt; {complexLabel}
+            {scopePath}
           </span>
         </span>
         <span style={{ ...styles.chevron, color: isDark ? '#FFFFFF' : '#6C757D' }}>{open ? '▲' : '▼'}</span>
@@ -118,7 +136,9 @@ export default function ScopeSelector({
                 </div>
                 {group.communities.map(community => (
                   <div key={community.key} style={styles.communityBlock}>
-                    <div style={styles.communityTitle}>{community.name}</div>
+                    {normalizeLabel(community.name) !== normalizeLabel(group.name) && (
+                      <div style={styles.communityTitle}>{community.name}</div>
+                    )}
                     {community.items.map(complex => (
                       <button
                         key={complex.id}
@@ -155,7 +175,7 @@ const styles = {
     gap: '0.45rem',
     borderRadius: '8px',
     border: '1px solid',
-    padding: '0.35rem 0.55rem',
+    padding: '0.28rem 0.5rem',
     cursor: 'pointer',
     fontFamily: 'inherit',
     textAlign: 'left',
@@ -168,10 +188,10 @@ const styles = {
     background: '#FFFFFF',
     borderColor: '#E9ECEF',
   },
-  icon: { fontSize: '0.95rem', flexShrink: 0 },
+  icon: { fontSize: '0.88rem', flexShrink: 0 },
   textBlock: { display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0, flex: 1 },
-  label: { fontSize: '0.62rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em' },
-  value: { fontSize: '0.78rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  label: { fontSize: '0.66rem', fontWeight: 700, letterSpacing: 0 },
+  value: { fontSize: '0.76rem', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   chevron: { fontSize: '0.58rem', flexShrink: 0 },
   dropdown: {
     position: 'absolute',
