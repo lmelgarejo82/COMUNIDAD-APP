@@ -23,3 +23,21 @@ export const accessLogService = {
     return api.post(`/access-logs/${id}/unobserve`);
   },
 };
+
+export const accessPreauthorizationService = {
+  list(params = {}) {
+    return api.get('/access-preauthorizations', { params });
+  },
+  create(data) {
+    return api.post('/access-preauthorizations', data);
+  },
+  cancel(id) {
+    return api.post(`/access-preauthorizations/${id}/cancel`);
+  },
+  search(params = {}) {
+    return api.get('/access-preauthorizations/search', { params });
+  },
+  use(id) {
+    return api.post(`/access-preauthorizations/${id}/use`);
+  },
+};
