@@ -14,6 +14,7 @@ import Audit from './pages/Audit';
 import Amenities from './pages/Amenities';
 import Documents from './pages/Documents';
 import HierarchyEditor from './pages/HierarchyEditor';
+import AccessLogs from './pages/AccessLogs';
 
 function App() {
   return (
@@ -39,6 +40,7 @@ function App() {
               <Route path="/amenities" element={<Amenities />} />
               <Route path="/documents" element={<Documents />} />
               <Route path="/estructura" element={<HierarchyEditor />} />
+              <Route path="/accesos" element={<AccessLogs />} />
               <Route path="/admin/estructura" element={<Navigate to="/estructura" replace />} />
               <Route path="/unidades" element={<Navigate to="/estructura" replace />} />
             </Route>

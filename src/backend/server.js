@@ -24,6 +24,7 @@ const chatRoutes = require('./routes/chat');
 const pollsRoutes = require('./routes/polls');
 const documentsRoutes = require('./routes/documents');
 const phoneRoutes = require('./routes/phone');
+const accessLogRoutes = require('./routes/accessLogs');
 const { startReminders } = require('./jobs/reminders');
 const { init: initMasterTicketQueue } = require('./jobs/masterTicketQueue');
 
@@ -54,6 +55,7 @@ app.use('/api/bookings', bookingsRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/polls', pollsRoutes);
 app.use('/api/documents', documentsRoutes);
+app.use('/api/access-logs', accessLogRoutes);
 app.use('/api', phoneRoutes);
 
 app.get('/api/health', (req, res) => {
