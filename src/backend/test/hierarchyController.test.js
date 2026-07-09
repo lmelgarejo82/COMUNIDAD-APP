@@ -131,3 +131,20 @@ test('hierarchy tree for admin lists only complexes from validated request commu
     { id: 30, name: 'Complejo C' },
   ]);
 });
+
+test('admin complexes endpoint returns allowed complexes with community scope metadata', async () => {
+  const { getAdminComplexes } = loadController({
+    adminComplexes: [
+      { id: 10, name: 'Complejo A', community_id: 1, community_name: 'Grupo Norte' },
+      { id: 20, name: 'Complejo B', community_id: 2, community_name: 'Grupo Sur' },
+    ],
+  });
+  const res = createResponse();
+
+  await getAdminComplexes({ user: { id: 5, role: 'admin' } }, res);
+
+  assert.deepEqual(res.body, [
+    { id: 10, name: 'Complejo A', community_id: 1, community_name: 'Grupo Norte' },
+    { id: 20, name: 'Complejo B', community_id: 2, community_name: 'Grupo Sur' },
+  ]);
+});

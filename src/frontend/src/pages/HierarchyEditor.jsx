@@ -12,6 +12,7 @@ import EditView from '../components/hierarchy/EditView';
 import EditModal from '../components/hierarchy/EditModal';
 import BulkCreateModal from '../components/hierarchy/BulkCreateModal';
 import ClassicView from '../components/hierarchy/ClassicView';
+import ScopeSelector from '../components/ScopeSelector';
 import t from '../theme';
 
 const VALID_DROPS = { complex: 'building', building: 'floor', floor: 'unit' };
@@ -185,6 +186,7 @@ export default function HierarchyEditor() {
   if (loading && !tree) return <Spinner />;
   const isEdit = mode === 'edit';
   const selectedComplex = complexes.find(c => c.id === selectedId);
+  const selectedCommunityName = selectedComplex?.community_name || 'Comunidad';
   const counts = countTree(tree);
   const summary = tree
     ? `${counts.buildings} edificio${counts.buildings !== 1 ? 's' : ''} · ${counts.floors} piso${counts.floors !== 1 ? 's' : ''} · ${counts.units} unidad${counts.units !== 1 ? 'es' : ''}`
@@ -204,13 +206,18 @@ export default function HierarchyEditor() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                 <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: t.colors.textPrimary }}>Estructura</h2>
                 {complexes.length > 0 && (
-                  <select style={selectStyle} value={selectedId || ''} onChange={e => setSelectedId(parseInt(e.target.value))}>
-                    {complexes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <ScopeSelector
+                    complexes={complexes}
+                    selectedId={selectedId}
+                    onChange={setSelectedId}
+                    variant="light"
+                  />
                 )}
               </div>
               <span style={summaryText}>
-                {selectedComplex?.name ? `${selectedComplex.name} · ${summary}` : summary}
+                {selectedComplex?.name
+                  ? `Alcance seleccionado: ${selectedCommunityName} > ${selectedComplex.name} · ${summary}`
+                  : summary}
               </span>
             </div>
             <div style={toolbar}>
@@ -337,13 +344,6 @@ const iconBtn = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-};
-
-const selectStyle = {
-  padding: '0.35rem 0.5rem', border: `1px solid ${t.colors.border}`,
-  borderRadius: t.radius.input, fontSize: '0.85rem', fontWeight: 600,
-  color: t.colors.textPrimary, background: t.colors.white,
-  outline: 'none', fontFamily: 'inherit', cursor: 'pointer',
 };
 
 const dragGhost = {

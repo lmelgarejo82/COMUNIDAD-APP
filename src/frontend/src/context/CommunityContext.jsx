@@ -14,18 +14,29 @@ export function CommunityProvider({ children }) {
     try {
       const { data } = await api.get('/hierarchy/admin/complexes');
       setComplexes(data);
-      if (!selectedId && data.length > 0) {
-        setSelectedId(data[0].id);
-      }
+      setSelectedId(prev => {
+        if (data.length === 0) return null;
+        if (prev && data.some(c => c.id === prev)) return prev;
+        return data[0].id;
+      });
     } catch {
       // Fallback legacy: try /admin/communities
       try {
         const { data } = await api.get('/admin/communities');
-        const mapped = data.map(c => ({ id: c.id, name: c.name, address: c.address }));
+        const mapped = data.map(c => ({
+          id: c.id,
+          name: c.name,
+          address: c.address,
+          community_id: c.community_id || c.id,
+          community_name: c.community_name || c.name,
+          type: c.type || 'complex',
+        }));
         setComplexes(mapped);
-        if (!selectedId && mapped.length > 0) {
-          setSelectedId(mapped[0].id);
-        }
+        setSelectedId(prev => {
+          if (mapped.length === 0) return null;
+          if (prev && mapped.some(c => c.id === prev)) return prev;
+          return mapped[0].id;
+        });
       } catch {
         /* no communities available */
       }

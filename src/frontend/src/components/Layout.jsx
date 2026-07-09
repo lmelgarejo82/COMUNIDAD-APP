@@ -5,6 +5,7 @@ import { useCommunity } from '../context/CommunityContext';
 import { notificationService } from '../services/comunicacion';
 import ChatWidget from './ChatWidget';
 import WhatsAppButton from './WhatsAppButton';
+import ScopeSelector from './ScopeSelector';
 
 function useWindowWidth() {
   const [width, setWidth] = useState(window.innerWidth);
@@ -111,19 +112,12 @@ export default function Layout() {
                 {link.label}
               </Link>
             ))}
-            {isAdmin && complexes.length > 1 && (
-              <div style={styles.complexSelector}>
-                <span style={styles.complexIcon}>&#127970;</span>
-                <select
-                  value={selectedId || ''}
-                  onChange={(e) => setSelectedId(parseInt(e.target.value))}
-                  style={styles.complexSelect}
-                >
-                  {complexes.map((c) => (
-                    <option key={c.id} value={c.id} style={{ color: '#212529', background: '#FFFFFF' }}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
+            {isAdmin && complexes.length > 0 && (
+              <ScopeSelector
+                complexes={complexes}
+                selectedId={selectedId}
+                onChange={setSelectedId}
+              />
             )}
           </nav>
         )}
@@ -153,17 +147,15 @@ export default function Layout() {
               {link.label}
             </Link>
           ))}
-          {isAdmin && complexes.length > 1 && (
+          {isAdmin && complexes.length > 0 && (
             <div style={{ padding: '0.5rem 1rem' }}>
-              <select
-                value={selectedId || ''}
-                onChange={(e) => { setSelectedId(parseInt(e.target.value)); setMenuOpen(false); }}
-                style={styles.complexSelectMobile}
-              >
-                {complexes.map((c) => (
-                  <option key={c.id} value={c.id} style={{ color: '#212529', background: '#FFFFFF' }}>{c.name}</option>
-                ))}
-              </select>
+              <ScopeSelector
+                complexes={complexes}
+                selectedId={selectedId}
+                onChange={(id) => { setSelectedId(id); setMenuOpen(false); }}
+                variant="light"
+                compact
+              />
             </div>
           )}
         </div>
@@ -219,21 +211,6 @@ const styles = {
     background: '#FFFFFF', zIndex: 98, overflowY: 'auto', paddingBottom: '4rem',
   },
   nav: { display: 'flex', gap: '0.2rem', alignItems: 'center' },
-  complexSelector: {
-    display: 'flex', alignItems: 'center', gap: '5px',
-    background: 'rgba(255,255,255,0.12)', borderRadius: '8px', padding: '3px 8px 3px 10px',
-    marginLeft: '0.5rem',
-  },
-  complexIcon: { fontSize: '0.85rem' },
-  complexSelect: {
-    border: 'none', background: 'transparent', fontSize: '0.78rem', fontWeight: 600,
-    color: '#FFFFFF', outline: 'none', cursor: 'pointer', padding: '3px 4px',
-    minWidth: '120px', fontFamily: 'inherit',
-  },
-  complexSelectMobile: {
-    width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '6px',
-    fontSize: '0.9rem', background: '#FFFFFF', color: '#212529', fontFamily: 'inherit',
-  },
   user: { display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', color: '#FFFFFF' },
   roleBadge: { padding: '0.1rem 0.5rem', background: 'rgba(255,255,255,0.15)', borderRadius: '4px', fontSize: '0.68rem', textTransform: 'uppercase', color: '#FFFFFF' },
   logoutBtn: { padding: '0.35rem 0.8rem', background: 'transparent', color: '#E74C3C', border: '1px solid #E74C3C', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 },
