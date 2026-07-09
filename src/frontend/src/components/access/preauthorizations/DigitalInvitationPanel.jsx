@@ -30,6 +30,8 @@ export default function DigitalInvitationPanel({ preauthorization }) {
   const [items, setItems] = useState([]);
   const [generated, setGenerated] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState('');
+  const [shareView, setShareView] = useState('qr');
+  const [shareMessageDraft, setShareMessageDraft] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -37,6 +39,8 @@ export default function DigitalInvitationPanel({ preauthorization }) {
   useEffect(() => {
     setGenerated(null);
     setQrDataUrl('');
+    setShareView('qr');
+    setShareMessageDraft('');
     setMessage('');
     setError('');
     if (preauthorization?.id) load();
@@ -82,6 +86,12 @@ export default function DigitalInvitationPanel({ preauthorization }) {
     try {
       const { data } = await accessPreauthorizationService.generateInvitation(preauthorization.id);
       setGenerated(data);
+      setShareView('qr');
+      setShareMessageDraft(buildShareMessage({
+        invitationUrl: data.invitation_url,
+        expiresAt: data.invitation?.expires_at,
+        context: getShareContext(),
+      }));
       setMessage(data.message);
       await load();
     } catch (err) {
@@ -106,13 +116,46 @@ export default function DigitalInvitationPanel({ preauthorization }) {
     }
   }
 
-  async function copyLink() {
-    if (!generated?.invitation_url) return;
-    await navigator.clipboard.writeText(generated.invitation_url);
-    setMessage('Enlace copiado');
+  async function copyText(value, successMessage) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setMessage(successMessage);
+      setError('');
+    } catch {
+      setError('No pudimos copiar automáticamente. Seleccioná el texto y copialo manualmente.');
+    }
+  }
+
+  function getShareContext() {
+    return preauthorization.complex_name || preauthorization.community_name || preauthorization.destination_label || 'la comunidad';
+  }
+
+  function getInvitationCode() {
+    if (!generated?.invitation_url) return '';
+    try {
+      const url = new URL(generated.invitation_url);
+      const parts = url.pathname.split('/').filter(Boolean);
+      const invitationIndex = parts.findIndex((part) => part.toLowerCase() === 'invitacion');
+      if (invitationIndex >= 0 && parts[invitationIndex + 1]) return decodeURIComponent(parts[invitationIndex + 1]);
+      return decodeURIComponent(parts.at(-1) || generated.invitation_url);
+    } catch {
+      return generated.token || generated.invitation_url;
+    }
+  }
+
+  function buildShareMessage({ invitationUrl, expiresAt, context }) {
+    if (!invitationUrl) return '';
+    return [
+      `Hola. Tenés una invitación para ingresar a ${context}.`,
+      'Mostrá este enlace o QR en portería:',
+      invitationUrl,
+      `Vigente hasta: ${formatDateTime(expiresAt)}`,
+    ].join('\n');
   }
 
   const canGenerate = (preauthorization.effective_status || preauthorization.status) === 'pending';
+  const invitationCode = getInvitationCode();
 
   return (
     <section style={styles.wrap}>
@@ -133,20 +176,87 @@ export default function DigitalInvitationPanel({ preauthorization }) {
       )}
 
       {generated && (
-        <div style={styles.generatedBox}>
-          <div style={styles.qrBox}>
-            {qrDataUrl ? <img src={qrDataUrl} alt="QR de invitación digital" style={styles.qrImage} /> : <span>Generando QR...</span>}
-          </div>
-          <div style={styles.generatedInfo}>
-            <strong>Compartir invitación</strong>
-            <span>Este enlace se muestra una sola vez. Si lo cerrás, podés generar uno nuevo.</span>
-            <span>La validación se realizará en el sistema al momento del ingreso.</span>
-            <span>Vence: {formatDateTime(generated.invitation?.expires_at)}</span>
-            <div style={styles.copyRow}>
-              <input value={generated.invitation_url} readOnly style={{ ...t.input, marginBottom: 0 }} />
-              <button type="button" onClick={copyLink} style={t.primaryBtn}>Copiar enlace</button>
+        <div style={styles.generatedWrap}>
+          <div style={styles.shareHeader}>
+            <div>
+              <strong>Compartir invitación</strong>
+              <span>Enviá este enlace al visitante por el canal que prefieras.</span>
+              <span>El QR no contiene datos personales. La validación se realiza en portería.</span>
             </div>
+            <InvitationStatusChip status="active" />
           </div>
+
+          <div style={styles.warningBox}>
+            Este enlace se muestra solo al generarlo. Si lo cerrás, podés generar una nueva invitación.
+          </div>
+
+          <div style={styles.shareTabs}>
+            {[
+              ['qr', 'Vista QR'],
+              ['message', 'Mensaje'],
+              ['details', 'Detalles'],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setShareView(key)}
+                style={shareView === key ? styles.shareTabActive : styles.shareTab}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {shareView === 'qr' && (
+            <div style={styles.generatedBox}>
+              <div style={styles.qrBox}>
+                {qrDataUrl ? <img src={qrDataUrl} alt="QR de invitación digital" style={styles.qrImage} /> : <span>Generando QR...</span>}
+              </div>
+              <div style={styles.generatedInfo}>
+                <span>Vigente hasta: <strong>{formatDateTime(generated.invitation?.expires_at)}</strong></span>
+                <div style={styles.copyRow}>
+                  <input value={generated.invitation_url} readOnly style={{ ...t.input, marginBottom: 0 }} />
+                  <button type="button" onClick={() => copyText(generated.invitation_url, 'Enlace copiado')} style={t.primaryBtn}>
+                    Copiar enlace
+                  </button>
+                </div>
+                <div style={styles.copyRow}>
+                  <input value={invitationCode} readOnly style={{ ...t.input, marginBottom: 0 }} />
+                  <button type="button" onClick={() => copyText(invitationCode, 'Código copiado')} style={t.secondaryBtn}>
+                    Copiar código
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {shareView === 'message' && (
+            <div style={styles.generatedInfo}>
+              <span>Mensaje sugerido editable para copiar y enviar manualmente.</span>
+              <textarea
+                value={shareMessageDraft}
+                onChange={(e) => setShareMessageDraft(e.target.value)}
+                rows={6}
+                style={{ ...t.input, resize: 'vertical', marginBottom: 0 }}
+              />
+              <div style={styles.actions}>
+                <button type="button" onClick={() => copyText(shareMessageDraft, 'Mensaje copiado')} style={t.primaryBtn}>
+                  Copiar mensaje
+                </button>
+              </div>
+            </div>
+          )}
+
+          {shareView === 'details' && (
+            <div style={styles.detailGrid}>
+              <span><strong>Visitante</strong>{preauthorization.visitor_name}</span>
+              <span><strong>Destino</strong>{preauthorization.destination_label || preauthorization.unit_code || 'Destino manual'}</span>
+              <span><strong>Código</strong>{invitationCode}</span>
+              <span><strong>Vigente hasta</strong>{formatDateTime(generated.invitation?.expires_at)}</span>
+              <span><strong>Estado</strong>Activa</span>
+              <span><strong>Canal</strong>Manual</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -162,6 +272,7 @@ export default function DigitalInvitationPanel({ preauthorization }) {
               </div>
               <span style={styles.meta}>Vence: {formatDateTime(item.expires_at)}</span>
               <span style={styles.meta}>Creada: {formatDateTime(item.created_at)}</span>
+              <span style={styles.meta}>No se muestra el enlace de invitaciones anteriores porque el token plano no se guarda.</span>
             </div>
             {item.status === 'active' && (
               <button type="button" onClick={() => revokeInvitation(item)} disabled={loading} style={t.secondaryBtn}>
@@ -179,11 +290,19 @@ const styles = {
   wrap: { border: `1px solid ${t.colors.border}`, borderRadius: t.radius.input, padding: '0.75rem', display: 'grid', gap: '0.65rem' },
   header: { display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start', flexWrap: 'wrap' },
   title: { margin: 0, fontSize: '0.9rem', fontWeight: 700, color: t.colors.textPrimary },
+  generatedWrap: { border: `1px solid ${t.colors.border}`, borderRadius: t.radius.input, padding: '0.75rem', display: 'grid', gap: '0.65rem', background: t.colors.bg },
+  shareHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap', fontSize: '0.82rem', color: t.colors.textSecondary },
+  warningBox: { border: `1px solid ${t.colors.warning || t.colors.border}`, borderRadius: t.radius.input, padding: '0.55rem', background: t.colors.warningSoft || t.colors.white, color: t.colors.textSecondary, fontSize: '0.8rem' },
+  shareTabs: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', border: `1px solid ${t.colors.border}`, borderRadius: t.radius.button, overflow: 'hidden', background: t.colors.white },
+  shareTab: { border: 'none', background: t.colors.white, color: t.colors.textSecondary, padding: '0.45rem', cursor: 'pointer', fontWeight: 600 },
+  shareTabActive: { border: 'none', background: t.colors.primarySoft, color: t.colors.primary, padding: '0.45rem', cursor: 'pointer', fontWeight: 700 },
   generatedBox: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', alignItems: 'start' },
   qrBox: { width: 'min(220px, 100%)', minHeight: '220px', border: `1px solid ${t.colors.border}`, borderRadius: t.radius.input, display: 'grid', placeItems: 'center', background: t.colors.white },
   qrImage: { width: '220px', height: '220px', display: 'block' },
   generatedInfo: { display: 'grid', gap: '0.35rem', fontSize: '0.82rem', color: t.colors.textSecondary },
   copyRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.45rem', alignItems: 'start' },
+  actions: { display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' },
+  detailGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.5rem', fontSize: '0.82rem', color: t.colors.textSecondary },
   list: { display: 'grid', gap: '0.45rem' },
   row: { border: `1px solid ${t.colors.border}`, borderRadius: t.radius.input, padding: '0.55rem', display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.5rem', alignItems: 'center' },
   rowTitle: { display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' },
