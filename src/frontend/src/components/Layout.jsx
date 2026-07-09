@@ -28,6 +28,7 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const isAdmin = user?.role === 'admin';
+  const isAccessOperator = user?.role === 'access_operator';
   const isMobile = width < 640;
 
   useEffect(() => {
@@ -70,15 +71,17 @@ export default function Layout() {
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
   }
 
-  const links = [
-    { to: '/dashboard', label: 'Dashboard' },
-    { to: '/expensas', label: 'Expensas' },
-    { to: '/anuncios', label: 'Anuncios' },
-    { to: '/tickets', label: 'Tickets' },
-    ...(isAdmin ? [{ to: '/accesos', label: 'Accesos' }, { to: '/invite', label: 'Invitar' }, { to: '/estructura', label: 'Estructura' }, { to: '/audit', label: 'Historial' }] : []),
-    { to: '/amenities', label: 'Amenities' },
-    { to: '/documents', label: 'Documentos' },
-  ];
+  const links = isAccessOperator
+    ? [{ to: '/accesos', label: 'Accesos' }]
+    : [
+        { to: '/dashboard', label: 'Dashboard' },
+        { to: '/expensas', label: 'Expensas' },
+        { to: '/anuncios', label: 'Anuncios' },
+        { to: '/tickets', label: 'Tickets' },
+        ...(isAdmin ? [{ to: '/accesos', label: 'Accesos' }, { to: '/invite', label: 'Invitar' }, { to: '/estructura', label: 'Estructura' }, { to: '/audit', label: 'Historial' }] : []),
+        { to: '/amenities', label: 'Amenities' },
+        { to: '/documents', label: 'Documentos' },
+      ];
 
   const linkStyle = (to) => ({
     textDecoration: 'none',
@@ -130,7 +133,7 @@ export default function Layout() {
           {!isMobile && (
             <>
               <strong>{user?.email}</strong>
-              <span style={styles.roleBadge}>{user?.role}</span>
+              <span style={styles.roleBadge}>{user?.role === 'access_operator' ? 'Guardia' : user?.role}</span>
             </>
           )}
           <button onClick={logout} style={styles.logoutBtn}>Salir</button>

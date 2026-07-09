@@ -31,16 +31,16 @@ function App() {
                 </ProtectedRoute>
               }
             >
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/expensas" element={<Expensas />} />
-              <Route path="/anuncios" element={<Anuncios />} />
-              <Route path="/tickets" element={<Tickets />} />
-              <Route path="/invite" element={<InviteResidente />} />
-              <Route path="/audit" element={<Audit />} />
-              <Route path="/amenities" element={<Amenities />} />
-              <Route path="/documents" element={<Documents />} />
-              <Route path="/estructura" element={<HierarchyEditor />} />
-              <Route path="/accesos" element={<AccessLogs />} />
+              <Route path="/dashboard" element={<ProtectedRoute roles={['admin', 'residente']}><Dashboard /></ProtectedRoute>} />
+              <Route path="/expensas" element={<ProtectedRoute roles={['admin', 'residente']}><Expensas /></ProtectedRoute>} />
+              <Route path="/anuncios" element={<ProtectedRoute roles={['admin', 'residente']}><Anuncios /></ProtectedRoute>} />
+              <Route path="/tickets" element={<ProtectedRoute roles={['admin', 'residente']}><Tickets /></ProtectedRoute>} />
+              <Route path="/invite" element={<ProtectedRoute roles={['admin']}><InviteResidente /></ProtectedRoute>} />
+              <Route path="/audit" element={<ProtectedRoute roles={['admin']}><Audit /></ProtectedRoute>} />
+              <Route path="/amenities" element={<ProtectedRoute roles={['admin', 'residente']}><Amenities /></ProtectedRoute>} />
+              <Route path="/documents" element={<ProtectedRoute roles={['admin', 'residente']}><Documents /></ProtectedRoute>} />
+              <Route path="/estructura" element={<ProtectedRoute roles={['admin']}><HierarchyEditor /></ProtectedRoute>} />
+              <Route path="/accesos" element={<ProtectedRoute roles={['admin', 'access_operator']}><AccessLogs /></ProtectedRoute>} />
               <Route path="/admin/estructura" element={<Navigate to="/estructura" replace />} />
               <Route path="/unidades" element={<Navigate to="/estructura" replace />} />
             </Route>

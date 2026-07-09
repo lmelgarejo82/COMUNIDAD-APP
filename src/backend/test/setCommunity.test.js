@@ -140,3 +140,36 @@ test('resident cannot force a different community', async () => {
   assert.equal(nextCalled, false);
   assert.equal(res.statusCode, 403);
 });
+
+test('access operator uses own community context and cannot force another community', async () => {
+  const setCommunity = loadMiddleware({
+    users: {
+      9: { id: 9, role: 'access_operator', community_id: 10 },
+    },
+  });
+  const req = { user: { id: 9, role: 'access_operator' }, query: { community: '11' } };
+  const res = createResponse();
+  let nextCalled = false;
+
+  await setCommunity(req, res, () => { nextCalled = true; });
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+});
+
+test('access operator receives validated own community when no context is forced', async () => {
+  const setCommunity = loadMiddleware({
+    users: {
+      9: { id: 9, role: 'access_operator', community_id: 10 },
+    },
+  });
+  const req = { user: { id: 9, role: 'access_operator' }, query: {} };
+  const res = createResponse();
+  let nextCalled = false;
+
+  await setCommunity(req, res, () => { nextCalled = true; });
+
+  assert.equal(nextCalled, true);
+  assert.equal(req.communityId, 10);
+  assert.equal(req.scope, 'user-community');
+});

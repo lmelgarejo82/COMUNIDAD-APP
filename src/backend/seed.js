@@ -96,6 +96,11 @@ async function seed() {
           `INSERT INTO users (email, password_hash, role, user_type, community_id, phone) VALUES ($1, $2, 'admin', 'owner', $3, '+5491112345678') RETURNING *`,
       ['admin2@comunidad.app', hash, c2.id]
     );
+    const { rows: [guard1] } = await client.query(
+      `INSERT INTO users (email, password_hash, role, user_type, community_id, phone)
+       VALUES ($1, $2, 'access_operator', 'owner', $3, '+5491112345678') RETURNING *`,
+      ['guardia1@comunidad.app', hash, c1.id]
+    );
 
     // admin1 manages both complexes (superadmin)
     if (complexesCreated.length >= 2) {
@@ -240,6 +245,9 @@ async function seed() {
     console.log('  Residentes (pass: admin123):');
     console.log(`    vecino11 .. vecino15@comunidad.app   [Torres del Parque]`);
     console.log(`    vecino21 .. vecino25@comunidad.app   [Country Los Olivos]`);
+    console.log('');
+    console.log('  Guardia demo (pass: admin123):');
+    console.log(`    ${guard1.email}   [Torres del Parque]`);
     console.log('');
     console.log('  6 expensas | 4 anuncios | 6 tickets con respuestas');
     console.log('');

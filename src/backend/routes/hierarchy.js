@@ -81,7 +81,7 @@ router.patch('/floors/:id/move',
 );
 
 // Units
-router.get('/units/search', authenticate, setCommunity, hc.searchUnits);
+router.get('/units/search', authenticate, authorize('admin', 'access_operator'), setCommunity, hc.searchUnits);
 router.get('/units', authenticate, setCommunity, hc.getUnits);
 router.post('/units',
   authenticate, authorize('admin'), setCommunity,
