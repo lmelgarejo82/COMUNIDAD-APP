@@ -27,12 +27,14 @@ const AdminComplex = {
   async findComplexesByAdmin(adminUserId) {
     const { rows } = await pool.query(
       `SELECT cx.id, cx.name, cx.address, cx.community_id, cx.created_at,
-              c.name AS community_name, c.address AS community_address
+              c.name AS community_name, c.address AS community_address,
+              o.id AS organization_id, o.name AS organization_name
        FROM complexes cx
        JOIN admin_complexes ac ON ac.complex_id = cx.id
        LEFT JOIN communities c ON c.id = cx.community_id
+       LEFT JOIN organizations o ON o.id = c.organization_id
        WHERE ac.user_id = $1
-       ORDER BY c.name, cx.name`,
+       ORDER BY o.name, c.name, cx.name`,
       [adminUserId]
     );
     return rows;

@@ -8,19 +8,25 @@ async function seed() {
     await client.query('BEGIN');
 
     console.log('Limpiando datos existentes...');
-    await client.query('TRUNCATE notifications, ticket_replies, tickets, master_ticket_units, master_tickets, announcement_reads, announcements, unit_expenses, expenses, unit_ownerships, units, floors, buildings, admin_complexes, complexes, users, communities RESTART IDENTITY CASCADE');
+    await client.query('TRUNCATE notifications, ticket_replies, tickets, master_ticket_units, master_tickets, announcement_reads, announcements, unit_expenses, expenses, unit_ownerships, units, floors, buildings, admin_complexes, complexes, users, communities, organizations RESTART IDENTITY CASCADE');
 
     const hash = await bcrypt.hash('admin123', 10);
 
-    // === 2 comunidades ===
+    // === Organización demo + 2 comunidades ===
+    console.log('Creando organización...');
+    const { rows: [org] } = await client.query(
+      `INSERT INTO organizations (name, legal_name) VALUES ($1, $2) RETURNING *`,
+      ['Administración Demo', 'Administración Demo']
+    );
+
     console.log('Creando comunidades...');
     const { rows: [c1] } = await client.query(
-      `INSERT INTO communities (name, address, access_code) VALUES ($1, $2, $3) RETURNING *`,
-      ['Torres del Parque', 'Av. Rivadavia 1500, CABA', 'TORRES2024']
+      `INSERT INTO communities (name, address, access_code, organization_id) VALUES ($1, $2, $3, $4) RETURNING *`,
+      ['Torres del Parque', 'Av. Rivadavia 1500, CABA', 'TORRES2024', org.id]
     );
     const { rows: [c2] } = await client.query(
-      `INSERT INTO communities (name, address, access_code) VALUES ($1, $2, $3) RETURNING *`,
-      ['Country Los Olivos', 'Ruta 8 Km 45, Pilar', 'OLIVOS2024']
+      `INSERT INTO communities (name, address, access_code, organization_id) VALUES ($1, $2, $3, $4) RETURNING *`,
+      ['Country Los Olivos', 'Ruta 8 Km 45, Pilar', 'OLIVOS2024', org.id]
     );
 
     // === Jerarquía (complejo 1: rico, complejo 2: simple) ===

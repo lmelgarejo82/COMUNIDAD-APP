@@ -98,3 +98,15 @@ test('migration runner applies pending migrations in filename order', async () =
     .filter((sql) => /^CREATE TABLE (first|second)/.test(sql));
   assert.deepEqual(appliedSql, ['CREATE TABLE first (id INT);', 'CREATE TABLE second (id INT);']);
 });
+
+test('organizations migration creates grouping table and backfills existing communities', () => {
+  const sql = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', '022_organizations.sql'),
+    'utf8'
+  );
+
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS organizations/i);
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS organization_id/i);
+  assert.match(sql, /INSERT INTO organizations/i);
+  assert.match(sql, /UPDATE communities c\s+SET organization_id = o\.id/is);
+});

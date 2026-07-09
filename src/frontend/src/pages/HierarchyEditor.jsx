@@ -186,6 +186,7 @@ export default function HierarchyEditor() {
   if (loading && !tree) return <Spinner />;
   const isEdit = mode === 'edit';
   const selectedComplex = complexes.find(c => c.id === selectedId);
+  const selectedOrganizationName = selectedComplex?.organization_name || 'Organización';
   const selectedCommunityName = selectedComplex?.community_name || 'Comunidad';
   const counts = countTree(tree);
   const summary = tree
@@ -216,7 +217,7 @@ export default function HierarchyEditor() {
               </div>
               <span style={summaryText}>
                 {selectedComplex?.name
-                  ? `Alcance seleccionado: ${selectedCommunityName} > ${selectedComplex.name} · ${summary}`
+                  ? `Alcance seleccionado: ${selectedOrganizationName} > ${selectedCommunityName} > ${selectedComplex.name} · ${summary}`
                   : summary}
               </span>
             </div>

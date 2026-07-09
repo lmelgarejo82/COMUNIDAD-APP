@@ -86,13 +86,21 @@ exports.listCommunities = async (req, res) => {
           address: c.address,
           type: 'complex',
           community_id: c.community_id,
+          community_name: c.community_name,
+          organization_id: c.organization_id,
+          organization_name: c.organization_name,
         })));
       }
     }
 
     // Legacy fallback
     const { rows } = await pool.query(
-      "SELECT DISTINCT c.id, c.name, c.address FROM communities c JOIN users u ON u.community_id = c.id WHERE u.id = $1 AND u.role = 'admin'",
+      `SELECT DISTINCT c.id, c.name, c.address, c.organization_id,
+              o.name AS organization_name
+       FROM communities c
+       JOIN users u ON u.community_id = c.id
+       LEFT JOIN organizations o ON o.id = c.organization_id
+       WHERE u.id = $1 AND u.role = 'admin'`,
       [req.user.id]
     );
     res.json(rows);

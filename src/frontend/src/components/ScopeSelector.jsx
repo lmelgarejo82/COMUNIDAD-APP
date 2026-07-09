@@ -4,6 +4,10 @@ function getCommunityLabel(complex) {
   return complex.community_name || complex.communityName || complex.group_name || 'Comunidad';
 }
 
+function getOrganizationLabel(complex) {
+  return complex.organization_name || complex.organizationName || 'Organización';
+}
+
 function getComplexType(complex) {
   if (complex.type && complex.type !== 'complex') return complex.type;
   return 'Complejo';
@@ -12,17 +16,28 @@ function getComplexType(complex) {
 function groupComplexes(complexes) {
   const map = new Map();
   for (const complex of complexes || []) {
-    const key = String(complex.community_id || complex.community_name || 'legacy');
-    if (!map.has(key)) {
-      map.set(key, {
-        key,
+    const orgKey = String(complex.organization_id || complex.organization_name || complex.community_id || 'legacy-org');
+    const communityKey = String(complex.community_id || complex.community_name || 'legacy-community');
+
+    if (!map.has(orgKey)) {
+      map.set(orgKey, { key: orgKey, name: getOrganizationLabel(complex), communities: new Map(), total: 0 });
+    }
+
+    const org = map.get(orgKey);
+    if (!org.communities.has(communityKey)) {
+      org.communities.set(communityKey, {
+        key: communityKey,
         name: getCommunityLabel(complex),
         items: [],
       });
     }
-    map.get(key).items.push(complex);
+    org.communities.get(communityKey).items.push(complex);
+    org.total += 1;
   }
-  return Array.from(map.values());
+  return Array.from(map.values()).map(group => ({
+    ...group,
+    communities: Array.from(group.communities.values()),
+  }));
 }
 
 export default function ScopeSelector({
@@ -39,7 +54,7 @@ export default function ScopeSelector({
     const q = query.trim().toLowerCase();
     const filtered = q
       ? (complexes || []).filter(c => {
-          const text = `${getCommunityLabel(c)} ${c.name} ${c.address || ''}`.toLowerCase();
+          const text = `${getOrganizationLabel(c)} ${getCommunityLabel(c)} ${c.name} ${c.address || ''}`.toLowerCase();
           return text.includes(q);
         })
       : complexes || [];
@@ -49,6 +64,7 @@ export default function ScopeSelector({
   if (!complexes || complexes.length === 0) return null;
 
   const isDark = variant === 'dark';
+  const organizationLabel = selected ? getOrganizationLabel(selected) : 'Organización';
   const communityLabel = selected ? getCommunityLabel(selected) : 'Alcance';
   const complexLabel = selected?.name || 'Seleccionar complejo';
 
@@ -68,7 +84,7 @@ export default function ScopeSelector({
           ...(isDark ? styles.triggerDark : styles.triggerLight),
           width: compact ? '100%' : undefined,
         }}
-        title={`${communityLabel} > ${complexLabel}`}
+        title={`${organizationLabel} > ${communityLabel} > ${complexLabel}`}
       >
         <span style={styles.icon}>&#127970;</span>
         <span style={styles.textBlock}>
@@ -76,7 +92,7 @@ export default function ScopeSelector({
             Alcance operativo
           </span>
           <span style={{ ...styles.value, color: isDark ? '#FFFFFF' : '#212529' }}>
-            {communityLabel} &gt; {complexLabel}
+            {organizationLabel} &gt; {communityLabel} &gt; {complexLabel}
           </span>
         </span>
         <span style={{ ...styles.chevron, color: isDark ? '#FFFFFF' : '#6C757D' }}>{open ? '▲' : '▼'}</span>
@@ -87,7 +103,7 @@ export default function ScopeSelector({
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Buscar comunidad o complejo"
+            placeholder="Buscar organización, comunidad o complejo"
             autoFocus
             style={styles.search}
           />
@@ -98,24 +114,29 @@ export default function ScopeSelector({
               <div key={group.key} style={styles.group}>
                 <div style={styles.groupTitle}>
                   <span>{group.name}</span>
-                  <span style={styles.count}>{group.items.length}</span>
+                  <span style={styles.count}>{group.total}</span>
                 </div>
-                {group.items.map(complex => (
-                  <button
-                    key={complex.id}
-                    type="button"
-                    onClick={() => selectComplex(complex.id)}
-                    style={{
-                      ...styles.option,
-                      ...(complex.id === selectedId ? styles.optionActive : null),
-                    }}
-                  >
-                    <span style={styles.optionName}>{complex.name}</span>
-                    <span style={styles.optionMeta}>
-                      {getComplexType(complex)}
-                      {complex.address ? ` · ${complex.address}` : ''}
-                    </span>
-                  </button>
+                {group.communities.map(community => (
+                  <div key={community.key} style={styles.communityBlock}>
+                    <div style={styles.communityTitle}>{community.name}</div>
+                    {community.items.map(complex => (
+                      <button
+                        key={complex.id}
+                        type="button"
+                        onClick={() => selectComplex(complex.id)}
+                        style={{
+                          ...styles.option,
+                          ...(complex.id === selectedId ? styles.optionActive : null),
+                        }}
+                      >
+                        <span style={styles.optionName}>{complex.name}</span>
+                        <span style={styles.optionMeta}>
+                          {getComplexType(complex)}
+                          {complex.address ? ` · ${complex.address}` : ''}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
             ))}
@@ -193,6 +214,13 @@ const styles = {
     borderRadius: '10px',
     padding: '1px 7px',
     color: '#6C757D',
+  },
+  communityBlock: { marginBottom: '0.25rem' },
+  communityTitle: {
+    padding: '0.2rem 0.55rem',
+    fontSize: '0.72rem',
+    color: '#0F3B5E',
+    fontWeight: 700,
   },
   option: {
     width: '100%',

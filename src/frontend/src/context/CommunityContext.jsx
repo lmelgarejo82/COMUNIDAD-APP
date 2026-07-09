@@ -29,6 +29,8 @@ export function CommunityProvider({ children }) {
           address: c.address,
           community_id: c.community_id || c.id,
           community_name: c.community_name || c.name,
+          organization_id: c.organization_id || c.community_id || c.id,
+          organization_name: c.organization_name || c.community_name || c.name,
           type: c.type || 'complex',
         }));
         setComplexes(mapped);
