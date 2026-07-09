@@ -116,7 +116,11 @@ const VisitorPreauthorization = {
     const params = [communityId];
     let idx = 2;
 
-    if (filters.status) {
+    if (filters.status === 'expired') {
+      where.push("vp.status = 'pending' AND vp.expected_until IS NOT NULL AND vp.expected_until < NOW()");
+    } else if (filters.status === 'pending') {
+      where.push("vp.status = 'pending' AND (vp.expected_until IS NULL OR vp.expected_until >= NOW())");
+    } else if (filters.status) {
       where.push(`vp.status = $${idx++}`);
       params.push(filters.status);
     }
@@ -136,6 +140,16 @@ const VisitorPreauthorization = {
       )`);
       params.push(`%${String(filters.search).trim()}%`);
       idx += 1;
+    }
+
+    if (filters.date_from) {
+      where.push(`COALESCE(vp.expected_from, vp.created_at) >= $${idx++}`);
+      params.push(filters.date_from);
+    }
+
+    if (filters.date_to) {
+      where.push(`COALESCE(vp.expected_from, vp.created_at) < ($${idx++}::date + INTERVAL '1 day')`);
+      params.push(filters.date_to);
     }
 
     params.push(limit, offset);
@@ -238,7 +252,13 @@ const VisitorPreauthorization = {
     if (!rows[0]) {
       const existing = await this.findByIdForCommunity(id, communityId);
       if (!existing) return null;
-      return { ...existing, alreadyFinal: existing.status !== 'pending' };
+      if (existing.status !== 'pending' || existing.effective_status !== 'pending') {
+        const error = new Error('PREAUTH_NOT_PENDING');
+        error.code = 'PREAUTH_NOT_PENDING';
+        error.preauthorization = existing;
+        throw error;
+      }
+      return existing;
     }
 
     return this.findByIdForCommunity(id, communityId);

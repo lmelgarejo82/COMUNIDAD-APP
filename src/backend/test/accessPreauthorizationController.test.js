@@ -132,6 +132,31 @@ test('guard search uses validated request community and complex context', async 
   assert.equal(res.body.data.length, 1);
 });
 
+test('admin list filters by status and date using validated request community', async () => {
+  let receivedCommunityId = null;
+  let receivedFilters = null;
+  const controller = loadController({
+    async list(communityId, filters) {
+      receivedCommunityId = communityId;
+      receivedFilters = filters;
+      return [{ id: 1, effective_status: 'expired' }];
+    },
+  });
+  const res = createResponse();
+
+  await controller.list({
+    communityId: 12,
+    user: { id: 10, role: 'admin' },
+    query: { status: 'expired', date_from: '2026-07-01', date_to: '2026-07-09', search: 'Ana' },
+  }, res);
+
+  assert.equal(receivedCommunityId, 12);
+  assert.equal(receivedFilters.status, 'expired');
+  assert.equal(receivedFilters.date_from, '2026-07-01');
+  assert.equal(receivedFilters.date_to, '2026-07-09');
+  assert.equal(res.body.data[0].effective_status, 'expired');
+});
+
 test('using a preauthorization returns created access log and used status', async () => {
   const controller = loadController({
     async use({ id, communityId, userId }) {
@@ -200,4 +225,24 @@ test('cancel marks preauthorization as cancelled without deleting it', async () 
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.preauthorization.status, 'cancelled');
+});
+
+test('cancel of used preauthorization is rejected', async () => {
+  const err = new Error('PREAUTH_NOT_PENDING');
+  err.code = 'PREAUTH_NOT_PENDING';
+  const controller = loadController({
+    async cancel() {
+      throw err;
+    },
+  });
+  const res = createResponse();
+
+  await controller.cancel({
+    params: { id: '5' },
+    communityId: 1,
+    user: { id: 10, role: 'admin' },
+  }, res);
+
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, { error: 'Solo se pueden cancelar preautorizaciones pendientes' });
 });

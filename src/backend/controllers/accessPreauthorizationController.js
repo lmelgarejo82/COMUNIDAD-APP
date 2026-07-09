@@ -109,10 +109,13 @@ exports.cancel = async (req, res) => {
     if (!item) return res.status(404).json({ error: 'Preautorización no encontrada' });
 
     res.json({
-      message: item.alreadyFinal ? 'La preautorización ya estaba cerrada.' : 'Preautorización cancelada correctamente.',
+      message: 'Preautorización cancelada correctamente.',
       preauthorization: item,
     });
   } catch (err) {
+    if (err.code === 'PREAUTH_NOT_PENDING') {
+      return res.status(409).json({ error: 'Solo se pueden cancelar preautorizaciones pendientes' });
+    }
     console.error('Error en accessPreauthorizationController.cancel:', err);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
