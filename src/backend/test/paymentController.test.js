@@ -209,6 +209,116 @@ test('repeated approved MercadoPago webhook does not duplicate confirmation side
   assert.equal(notifications, 0);
 });
 
+test('approved MercadoPago webhook with amount mismatch does not confirm payment', async () => {
+  clearControllers();
+  let confirmations = 0;
+  let mismatchStatus = null;
+
+  mockModule(expensePath, {
+    Expense: {
+      async findUnitExpenseById() {
+        return { id: 22, amount_owed: '1500.00', status: 'in_review' };
+      },
+      async confirmUnitExpense() {
+        confirmations += 1;
+      },
+    },
+  });
+  mockModule(paymentTransactionPath, {
+    PaymentTransaction: {
+      async findByPaymentId() {
+        return null;
+      },
+      async findByExternalReference() {
+        return { id: 3, unit_expense_id: 22, status: 'pending' };
+      },
+      async updateStatusById(id, status) {
+        mismatchStatus = status;
+        return { id, status };
+      },
+    },
+  });
+  mockModule(notificationPath, {
+    Notification: {
+      async create() {
+        throw new Error('should not notify');
+      },
+    },
+  });
+  mockModule(cachePath, { invalidatePattern: async () => {} });
+  mockModule(mpPath, {
+    MercadoPagoConfig: class {},
+    Preference: class {},
+    Payment: class {
+      async get() {
+        return {
+          id: '902',
+          status: 'approved',
+          external_reference: 'pt-valid',
+          transaction_amount: 1000,
+        };
+      }
+    },
+  });
+
+  const { webhook } = require('../controllers/paymentController');
+  const res = createResponse();
+
+  await webhook({ body: { type: 'payment', data: { id: '902' } } }, res);
+
+  assert.equal(res.sentStatus, 200);
+  assert.equal(mismatchStatus, 'amount_mismatch');
+  assert.equal(confirmations, 0);
+});
+
+test('MercadoPago webhook with non-approved status updates transaction but does not confirm', async () => {
+  clearControllers();
+  let confirmations = 0;
+  let txStatus = null;
+
+  mockModule(expensePath, {
+    Expense: {
+      async confirmUnitExpense() {
+        confirmations += 1;
+      },
+    },
+  });
+  mockModule(paymentTransactionPath, {
+    PaymentTransaction: {
+      async findByPaymentId() {
+        return null;
+      },
+      async findByExternalReference() {
+        return { id: 3, unit_expense_id: 22, status: 'pending' };
+      },
+      async updateStatusById(id, status) {
+        txStatus = status;
+        return { id, status };
+      },
+    },
+  });
+  mockModule(notificationPath, { Notification: {} });
+  mockModule(cachePath, { invalidatePattern: async () => {} });
+  mockModule(mpPath, {
+    MercadoPagoConfig: class {},
+    Preference: class {},
+    Payment: class {
+      async get() {
+        return { id: '903', status: 'pending', external_reference: 'pt-valid' };
+      }
+    },
+  });
+
+  const { webhook } = require('../controllers/paymentController');
+  const res = createResponse();
+
+  await webhook({ body: { type: 'payment', data: { id: '903' } } }, res);
+
+  assert.equal(res.sentStatus, 200);
+  assert.equal(txStatus, 'pending');
+  assert.equal(confirmations, 0);
+});
+
 test('MercadoPago webhook without a valid internal reference does not confirm anything', async () => {
   clearControllers();
   let confirmations = 0;
@@ -283,5 +393,40 @@ test('admin cannot confirm a unit expense from another request community', async
   await confirmPayment(req, res);
 
   assert.equal(res.statusCode, 403);
+  assert.equal(confirmed, false);
+});
+
+test('manual confirmation of an already paid expense does not reconfirm', async () => {
+  clearControllers();
+  let confirmed = false;
+
+  mockModule(expensePath, {
+    Expense: {
+      async findUnitExpenseWithCommunity() {
+        return { id: 50, status: 'paid', expense_community_id: 1 };
+      },
+      async confirmUnitExpense() {
+        confirmed = true;
+      },
+    },
+  });
+  mockModule(notificationPath, { Notification: {} });
+  mockModule(cachePath, { invalidatePattern: async () => {} });
+  mockModule(whatsappPath, { sendPaymentConfirmation: async () => {} });
+  mockModule(dbPath, {
+    pool: {
+      async query() {
+        return { rows: [] };
+      },
+    },
+  });
+
+  const { confirmPayment } = require('../controllers/expenseController');
+  const req = { params: { unitExpenseId: '50' }, communityId: 1 };
+  const res = createResponse();
+
+  await confirmPayment(req, res);
+
+  assert.equal(res.statusCode, 400);
   assert.equal(confirmed, false);
 });

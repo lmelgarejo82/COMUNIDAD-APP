@@ -108,6 +108,23 @@ test('admin can select an assigned complex and receives validated context', asyn
   assert.equal(req.complexId, 7);
 });
 
+test('admin cannot select an unassigned complex', async () => {
+  const setCommunity = loadMiddleware({
+    queryRows: [
+      { rows: [{ is_super_admin: false }] },
+      { rows: [{ id: 8, community_id: 40 }] },
+    ],
+  });
+  const req = { user: { id: 1, role: 'admin' }, query: { complex: '8' } };
+  const res = createResponse();
+  let nextCalled = false;
+
+  await setCommunity(req, res, () => { nextCalled = true; });
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+});
+
 test('resident cannot force a different community', async () => {
   const setCommunity = loadMiddleware({
     users: {
