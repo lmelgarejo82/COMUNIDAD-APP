@@ -10,7 +10,7 @@ const paletteItems = [
 ];
 
 const validTargets = {
-  complex: 'Se suelta sobre otro complejo (slo desde paleta)',
+  complex: 'Se suelta sobre otro complejo (solo desde paleta)',
   building: 'Se suelta sobre un complejo',
   floor: 'Se suelta sobre un edificio',
   unit: 'Se suelta sobre un piso',
@@ -110,7 +110,7 @@ export default function Palette() {
           borderTop: `1px solid ${t.colors.border}`,
           fontSize: '0.62rem', color: t.colors.textDisabled, lineHeight: 1.5,
         }}>
-          Arrastr elementos al canvas. Solt sobre un nodo compatible para crear.
+          Arrastrá elementos al canvas. Soltá sobre un nodo compatible para crear.
         </div>
       )}
     </div>

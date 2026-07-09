@@ -11,7 +11,7 @@ export default function CardView({ tree, onEdit, onDelete, onAddChild }) {
           No hay complejo seleccionado
         </p>
         <p style={{ fontSize: '0.8rem', color: t.colors.textSecondary, margin: 0 }}>
-          Seleccion un complejo del men superior o arrastr un elemento desde la paleta.
+          Seleccioná un complejo del menú superior o arrastrá un elemento desde la paleta.
         </p>
       </div>
     );

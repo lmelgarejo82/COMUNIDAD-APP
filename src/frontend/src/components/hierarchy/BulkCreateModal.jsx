@@ -116,7 +116,7 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
   return (
     <div style={t.modal.overlay} onClick={onClose}>
       <div style={{ ...t.modal.box, maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
-        <h3 style={t.modal.title}>Creacin Rpida</h3>
+        <h3 style={t.modal.title}>Creación rápida</h3>
 
         {parentType === 'complex' && <>
           <div style={fg}>
@@ -165,14 +165,14 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
                 <input style={t.input} type="number" min="1" max="200" value={totalLots} onChange={e => setTotalLots(e.target.value)} />
               </div>
               <p style={{ fontSize: '0.75rem', color: t.colors.textSecondary, margin: '0.25rem 0', fontStyle: 'italic' }}>
-                Se crear un piso automtico "Planta Baja" con {totalLots} {buildingType === 'house' ? 'casas' : 'lotes'}
+                Se creará un piso automático "Planta Baja" con {totalLots} {buildingType === 'house' ? 'casas' : 'lotes'}
               </p>
             </>
           )}
 
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
             <div style={flex1}>
-              <label style={lbl}>rea (m) por unid.</label>
+              <label style={lbl}>Área (m²) por unidad</label>
               <input style={t.input} type="number" value={areaM2} onChange={e => setAreaM2(e.target.value)} placeholder="Opcional" />
             </div>
             <div style={flex1}>
@@ -188,7 +188,7 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
           </p>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <div style={flex1}>
-              <label style={lbl}>N de piso</label>
+              <label style={lbl}>N° de piso</label>
               <input style={t.input} type="number" min="1" max="100" value={floorCount} onChange={e => setFloorCount(e.target.value)} />
             </div>
             <div style={flex1}>
@@ -227,7 +227,7 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
 
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
           <div style={flex1}>
-            <label style={lbl}>rea (m) por unid.</label>
+            <label style={lbl}>Área (m²) por unidad</label>
             <input style={t.input} type="number" value={areaM2} onChange={e => setAreaM2(e.target.value)} placeholder="Opcional" />
           </div>
           <div style={flex1}>

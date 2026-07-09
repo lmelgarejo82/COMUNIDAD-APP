@@ -5,9 +5,9 @@ export default function EditView({ tree, onEdit, onDelete, onAddChild, onDoubleC
   if (!tree) {
     return (
       <div style={{ textAlign: 'center', padding: '3rem 1rem', color: t.colors.textSecondary }}>
-        <p style={{ fontWeight: 600, color: t.colors.textPrimary, margin: '0 0 0.25rem' }}>No hay datos</p>
+        <p style={{ fontWeight: 600, color: t.colors.textPrimary, margin: '0 0 0.25rem' }}>No hay estructura seleccionada</p>
         <p style={{ fontSize: '0.8rem', margin: 0 }}>
-          Seleccion un complejo o arrastr un elemento desde la paleta.
+          Seleccioná un complejo o arrastrá un elemento desde la paleta.
         </p>
       </div>
     );

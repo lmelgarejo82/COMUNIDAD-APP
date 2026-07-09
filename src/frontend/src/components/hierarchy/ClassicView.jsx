@@ -119,7 +119,7 @@ export default function ClassicView({ tree, canCreateComplex, onCreate, onEdit, 
                           ) : units.map(unit => (
                             <div key={unit.id} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', border: `1px solid ${t.colors.border}`, borderRadius: t.radius.input, padding: '0.35rem 0.5rem', background: t.colors.white }}>
                               <strong style={{ color: t.colors.primary, fontSize: '0.82rem' }}>{unit.unit_code}</strong>
-                              {unit.area_m2 && <span style={{ fontSize: '0.68rem', color: t.colors.textSecondary }}>{unit.area_m2}m2</span>}
+                              {unit.area_m2 && <span style={{ fontSize: '0.68rem', color: t.colors.textSecondary }}>{unit.area_m2}m²</span>}
                               {unit.coef_percent && <span style={{ fontSize: '0.68rem', color: t.colors.textSecondary }}>{unit.coef_percent}%</span>}
                               <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.1rem' }}>
                                 <button style={actionButton(t.colors.textSecondary)} onClick={() => onEdit('unit', unit)}>Editar</button>

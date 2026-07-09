@@ -18,11 +18,24 @@ const VALID_DROPS = { complex: 'building', building: 'floor', floor: 'unit' };
 const TARGET_PARENT = { building: 'complex', floor: 'building', unit: 'floor' };
 
 const MODES = [
-  { key: 'tree', label: 'Arbol' },
+  { key: 'tree', label: 'Árbol' },
   { key: 'compact', label: 'Compacto' },
-  { key: 'classic', label: 'ABM clasico' },
-  { key: 'edit', label: 'Edicion visual' },
+  { key: 'classic', label: 'ABM clásico' },
+  { key: 'edit', label: 'Edición visual' },
 ];
+
+function countTree(tree) {
+  const buildings = tree?.buildings || [];
+  return buildings.reduce((acc, building) => {
+    const floors = building.floors || [];
+    const units = floors.reduce((sum, floor) => sum + (floor.units || []).length, 0);
+    return {
+      buildings: acc.buildings + 1,
+      floors: acc.floors + floors.length,
+      units: acc.units + units,
+    };
+  }, { buildings: 0, floors: 0, units: 0 });
+}
 
 export default function HierarchyEditor() {
   const { user } = useAuth();
@@ -44,7 +57,11 @@ export default function HierarchyEditor() {
   }, []);
 
   const loadTree = useCallback(async () => {
-    if (!selectedId) return;
+    if (!selectedId) {
+      setTree(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data } = await hierarchyService.getTree(selectedId);
@@ -59,7 +76,7 @@ export default function HierarchyEditor() {
 
   function setModeAndSave(m) { localStorage.setItem('hierarchyMode', m); setMode(m); }
 
-  // Drag & Drop (modo edicion)
+  // Drag & Drop (modo edición)
 
   function handleDragStart(event) { setActiveDrag(event.active); }
 
@@ -145,7 +162,7 @@ export default function HierarchyEditor() {
     } catch (err) { showMsg(getErrorMessage(err, 'Error al eliminar'), 'error'); setDel(null); }
   }
 
-  // Creacion rapida
+  // Creación rápida
 
   function openBulk() { setBulk({ parentType: 'complex', parentNode: tree || null }); }
   function openAddChild(nodeType, node) { setBulk({ parentType: nodeType, parentNode: node }); }
@@ -167,6 +184,13 @@ export default function HierarchyEditor() {
 
   if (loading && !tree) return <Spinner />;
   const isEdit = mode === 'edit';
+  const selectedComplex = complexes.find(c => c.id === selectedId);
+  const counts = countTree(tree);
+  const summary = tree
+    ? `${counts.buildings} edificio${counts.buildings !== 1 ? 's' : ''} · ${counts.floors} piso${counts.floors !== 1 ? 's' : ''} · ${counts.units} unidad${counts.units !== 1 ? 'es' : ''}`
+    : complexes.length > 0
+    ? 'Seleccioná un complejo para ver su estructura'
+    : 'Sin complejos disponibles';
 
   return (
     <>
@@ -176,15 +200,20 @@ export default function HierarchyEditor() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* ── Top Bar ── */}
           <div style={topBar}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: t.colors.textPrimary }}>Estructura</h2>
-              {complexes.length > 0 && (
-                <select style={selectStyle} value={selectedId || ''} onChange={e => setSelectedId(parseInt(e.target.value))}>
-                  {complexes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              )}
+            <div style={titleGroup}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: t.colors.textPrimary }}>Estructura</h2>
+                {complexes.length > 0 && (
+                  <select style={selectStyle} value={selectedId || ''} onChange={e => setSelectedId(parseInt(e.target.value))}>
+                    {complexes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
+              </div>
+              <span style={summaryText}>
+                {selectedComplex?.name ? `${selectedComplex.name} · ${summary}` : summary}
+              </span>
             </div>
-            <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+            <div style={toolbar}>
               {MODES.map(m => (
                 <button key={m.key}
                   style={{
@@ -197,12 +226,12 @@ export default function HierarchyEditor() {
                   {m.label}
                 </button>
               ))}
-              <button style={t.secondaryBtn} onClick={loadTree}>&#8635;</button>
+              <button style={iconBtn} onClick={loadTree} title="Actualizar estructura">&#8635;</button>
               {canCreateComplex && (
                 <button style={t.secondaryBtn} onClick={() => openCreate('complex', null)}>+ Complejo</button>
               )}
               {tree && mode !== 'compact' && (
-                <button style={t.primaryBtn} onClick={openBulk}>+ Creacion rapida</button>
+                <button style={t.primaryBtn} onClick={openBulk}>+ Creación rápida</button>
               )}
               {msg && <span style={t.toast(msgType)}>{msg}</span>}
             </div>
@@ -249,9 +278,9 @@ export default function HierarchyEditor() {
       {del && (
         <div style={t.modal.overlay} onClick={() => setDel(null)}>
           <div style={t.modal.box} onClick={e => e.stopPropagation()}>
-            <h3 style={t.modal.title}>Confirmar eliminacion</h3>
+            <h3 style={t.modal.title}>Confirmar eliminación</h3>
             <p style={{ margin: '0 0 0.5rem', fontSize: '0.85rem', color: t.colors.textSecondary }}>
-              Eliminar <strong>{del.node.name || del.node.unit_code || `#${del.node.id}`}</strong>? Esta accion es irreversible.
+              ¿Eliminar <strong>{del.node.name || del.node.unit_code || `#${del.node.id}`}</strong>? Esta acción es irreversible.
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
               <button style={t.secondaryBtn} onClick={() => setDel(null)}>Cancelar</button>
@@ -273,10 +302,41 @@ const topBar = {
   flexWrap: 'wrap', gap: '0.5rem', flexShrink: 0,
 };
 
+const titleGroup = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.15rem',
+  minWidth: '220px',
+};
+
+const summaryText = {
+  fontSize: '0.75rem',
+  color: t.colors.textSecondary,
+  lineHeight: 1.3,
+};
+
+const toolbar = {
+  display: 'flex',
+  gap: '0.35rem',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  justifyContent: 'flex-end',
+};
+
 const modeBtn = {
   padding: '0.35rem 0.75rem', borderRadius: t.radius.button,
   fontSize: '0.78rem', cursor: 'pointer', whiteSpace: 'nowrap',
   fontFamily: 'inherit', transition: 'all 0.15s',
+};
+
+const iconBtn = {
+  ...t.secondaryBtn,
+  width: '34px',
+  height: '34px',
+  padding: 0,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
 };
 
 const selectStyle = {

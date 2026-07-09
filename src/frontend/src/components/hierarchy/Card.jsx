@@ -171,7 +171,7 @@ export default function Card({ node, depth, onEdit, onDelete, onAddChild, onDoub
           ))}
           {childCount === 0 && config.childType && (
             <span style={{ fontSize: '0.7rem', color: t.colors.textDisabled, fontStyle: 'italic', padding: '0.15rem 0' }}>
-              Soltar {config.labelPlural} aqu
+              Soltar {config.labelPlural} aquí
             </span>
           )}
         </div>

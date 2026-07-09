@@ -116,7 +116,7 @@ export default function TreeNode({ node, depth, onEdit, onDelete, onDrop, disabl
       ))}
       {!collapsed && !isUnit && childCount === 0 && (
         <div style={{ marginLeft: `${(depth + 1) * 20}px`, padding: '0.3rem 0.5rem', fontSize: '0.7rem', color: t.colors.textDisabled, fontStyle: 'italic' }}>
-          Solt {config.childType === 'building' ? 'edificios' : config.childType === 'floor' ? 'pisos' : 'unidades'} aqu
+          Soltá {config.childType === 'building' ? 'edificios' : config.childType === 'floor' ? 'pisos' : 'unidades'} aquí
         </div>
       )}
     </div>

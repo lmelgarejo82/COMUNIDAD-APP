@@ -62,7 +62,7 @@ export default function EditModal({ nodeType, node, onSave, onClose }) {
 
         {nodeType === 'complex' && <>
           <Field label="Nombre *" value={form.name} onChange={v => set('name', v)} />
-          <Field label="Direccin" value={form.address} onChange={v => set('address', v)} />
+          <Field label="Dirección" value={form.address} onChange={v => set('address', v)} />
         </>}
 
         {nodeType === 'building' && <>
@@ -85,7 +85,7 @@ export default function EditModal({ nodeType, node, onSave, onClose }) {
         {nodeType === 'floor' && <>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <div style={{ flex: 1 }}>
-              <Field label="Nmero *" value={form.number} onChange={v => set('number', v)} type="number" />
+              <Field label="Número *" value={form.number} onChange={v => set('number', v)} type="number" />
             </div>
             <div style={{ flex: 2 }}>
               <Field label="Nombre" value={form.floorName} onChange={v => set('floorName', v)} />
@@ -95,11 +95,11 @@ export default function EditModal({ nodeType, node, onSave, onClose }) {
         </>}
 
         {nodeType === 'unit' && <>
-          <Field label="Cdigo *" value={form.unit_code} onChange={v => set('unit_code', v)} />
+          <Field label="Código *" value={form.unit_code} onChange={v => set('unit_code', v)} />
           <Field label="Tipo" value={form.unit_type} onChange={v => set('unit_type', v)} />
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <div style={{ flex: 1 }}>
-              <Field label="rea (m)" value={form.area_m2} onChange={v => set('area_m2', v)} type="number" />
+              <Field label="Área (m²)" value={form.area_m2} onChange={v => set('area_m2', v)} type="number" />
             </div>
             <div style={{ flex: 1 }}>
               <Field label="Coef. (%)" value={form.coef_percent} onChange={v => set('coef_percent', v)} type="number" />
