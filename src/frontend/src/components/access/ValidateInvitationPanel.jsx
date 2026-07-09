@@ -8,9 +8,11 @@ function formatDateTime(value) {
 }
 
 export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
+  const [mode, setMode] = useState('manual');
   const [token, setToken] = useState('');
   const [invitation, setInvitation] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -25,10 +27,11 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
     setMessage('');
     setError('');
     setInvitation(null);
+    setConfirmed(false);
     try {
       const { data } = await accessInvitationService.validate(token);
       setInvitation(data.invitation);
-      setMessage(data.invitation.status === 'used' ? 'La invitación ya fue usada.' : 'Invitación válida.');
+      setMessage(data.invitation.status === 'used' ? 'Esta invitación ya fue utilizada.' : 'Invitación válida');
     } catch (err) {
       setError(err.response?.data?.error || 'Invitación inválida o vencida.');
     } finally {
@@ -43,7 +46,8 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
     try {
       const { data } = await accessInvitationService.use(token);
       setInvitation(data.invitation);
-      setMessage(data.message);
+      setConfirmed(true);
+      setMessage(data.invitation?.status === 'used' && data.message?.includes('ya') ? 'Esta invitación ya fue utilizada.' : 'Ingreso confirmado correctamente.');
       await onUsed?.(data);
     } catch (err) {
       setError(err.response?.data?.error || 'No se pudo registrar el ingreso desde la invitación.');
@@ -55,11 +59,26 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
   function clear() {
     setToken('');
     setInvitation(null);
+    setConfirmed(false);
     setMessage('');
     setError('');
   }
 
   const canConfirm = invitation?.status === 'active';
+  const alreadyUsed = invitation?.status === 'used' && message === 'Esta invitación ya fue utilizada.';
+  const statusLabel = confirmed && !alreadyUsed ? 'Ingreso confirmado' : invitation?.status === 'used' ? 'Ya usado' : 'Válido';
+  const resultTitle = alreadyUsed
+    ? 'Esta invitación ya fue utilizada.'
+    : confirmed
+      ? 'Ingreso confirmado correctamente.'
+      : invitation?.status === 'used'
+        ? 'Esta invitación ya fue utilizada.'
+        : 'Invitación válida';
+  const statusStyle = confirmed && !alreadyUsed
+    ? t.badge(t.colors.success, t.colors.successSoft)
+    : invitation?.status === 'used'
+      ? t.badge(t.colors.textSecondary, t.colors.border)
+      : t.badge(t.colors.success, t.colors.successSoft);
 
   return (
     <div style={styles.overlay}>
@@ -73,24 +92,61 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
         </div>
 
         <div style={styles.body}>
-          <label>
-            <span style={t.font.label}>Enlace o código</span>
-            <textarea
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              rows={4}
-              placeholder="Pegá el enlace o código de la invitación"
-              style={{ ...t.input, resize: 'vertical' }}
-            />
-          </label>
-          <div style={styles.actions}>
-            <button type="button" onClick={clear} disabled={loading} style={t.secondaryBtn}>Limpiar</button>
-            <button type="button" onClick={validate} disabled={loading} style={t.primaryBtn}>
-              {loading ? 'Validando...' : 'Validar invitación'}
+          <div style={styles.modeToggle}>
+            <button type="button" onClick={() => setMode('manual')} style={mode === 'manual' ? styles.modeBtnActive : styles.modeBtn}>
+              Manual
+            </button>
+            <button type="button" onClick={() => setMode('scan')} style={mode === 'scan' ? styles.modeBtnActive : styles.modeBtn}>
+              Escanear QR
             </button>
           </div>
 
-          {(message || error) && (
+          {mode === 'manual' ? (
+            <section style={styles.modeSection}>
+              <div style={styles.initialState}>
+                <strong>Validación manual</strong>
+                <span>Pegá el enlace completo o el código de invitación. La validación se realiza en el sistema antes de registrar el ingreso.</span>
+              </div>
+              <label>
+                <span style={t.font.label}>Enlace o código</span>
+                <textarea
+                  value={token}
+                  onChange={(e) => {
+                    setToken(e.target.value);
+                    setInvitation(null);
+                    setConfirmed(false);
+                    setMessage('');
+                    setError('');
+                  }}
+                  rows={4}
+                  placeholder="Pegá el enlace o código de invitación"
+                  style={{ ...t.input, resize: 'vertical' }}
+                />
+              </label>
+              <div style={styles.actions}>
+                <button type="button" onClick={clear} disabled={loading} style={t.secondaryBtn}>Limpiar</button>
+                <button type="button" onClick={validate} disabled={loading} style={t.primaryBtn}>
+                  {loading ? 'Validando...' : 'Validar'}
+                </button>
+              </div>
+            </section>
+          ) : (
+            <section style={styles.scanPlaceholder}>
+              <strong>Escanear QR</strong>
+              <span>Escaneo por cámara próximamente. Usá ingreso manual.</span>
+              <button type="button" onClick={() => setMode('manual')} style={t.secondaryBtn}>
+                Usar ingreso manual
+              </button>
+            </section>
+          )}
+
+          {loading && (
+            <div style={styles.loadingBox}>
+              Validando invitación...
+            </div>
+          )}
+
+          {(message || error) && !loading && (
             <div style={error ? t.toast('error') : t.toast('success')}>
               {error || message}
             </div>
@@ -100,10 +156,9 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
             <section style={styles.summary}>
               <div style={styles.summaryHeader}>
                 <strong>{invitation.visitor_name}</strong>
-                <span style={invitation.status === 'used' ? t.badge(t.colors.textSecondary, t.colors.border) : t.badge(t.colors.success, t.colors.successSoft)}>
-                  {invitation.status === 'used' ? 'Ya usado' : 'Válido'}
-                </span>
+                <span style={statusStyle}>{statusLabel}</span>
               </div>
+              <span style={styles.resultTitle}>{resultTitle}</span>
               <span style={styles.meta}>{invitation.destination_label || 'Destino manual'}</span>
               <span style={styles.meta}>Tipo: {invitation.visit_type}</span>
               <span style={styles.meta}>Documento: {invitation.visitor_document || 'Sin dato'}</span>
@@ -113,7 +168,7 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
 
               <div style={styles.actions}>
                 <button type="button" onClick={onClose} style={t.secondaryBtn}>Cerrar</button>
-                <button type="button" onClick={confirmUse} disabled={loading || !canConfirm} style={{ ...t.primaryBtn, opacity: canConfirm ? 1 : 0.65 }}>
+                <button type="button" onClick={confirmUse} disabled={loading || !canConfirm || confirmed} style={{ ...t.primaryBtn, opacity: canConfirm && !confirmed ? 1 : 0.65 }}>
                   Confirmar ingreso
                 </button>
               </div>
@@ -133,7 +188,15 @@ const styles = {
   closeBtn: { border: 'none', background: 'transparent', fontSize: '1.6rem', cursor: 'pointer', color: t.colors.textSecondary },
   body: { display: 'grid', gap: '0.7rem' },
   actions: { display: 'flex', justifyContent: 'flex-end', gap: '0.55rem', flexWrap: 'wrap' },
+  modeToggle: { display: 'grid', gridTemplateColumns: '1fr 1fr', border: `1px solid ${t.colors.border}`, borderRadius: t.radius.button, overflow: 'hidden' },
+  modeBtn: { border: 'none', background: t.colors.white, color: t.colors.textSecondary, padding: '0.5rem', cursor: 'pointer', fontWeight: 600 },
+  modeBtnActive: { border: 'none', background: t.colors.primarySoft, color: t.colors.primary, padding: '0.5rem', cursor: 'pointer', fontWeight: 700 },
+  modeSection: { display: 'grid', gap: '0.6rem' },
+  initialState: { ...t.card, padding: '0.7rem', display: 'grid', gap: '0.2rem', fontSize: '0.8rem', color: t.colors.textSecondary },
+  scanPlaceholder: { ...t.card, padding: '0.9rem', display: 'grid', gap: '0.45rem', color: t.colors.textSecondary, fontSize: '0.82rem' },
+  loadingBox: { border: `1px solid ${t.colors.border}`, borderRadius: t.radius.input, padding: '0.65rem', fontSize: '0.82rem', color: t.colors.textSecondary, background: t.colors.bg },
   summary: { ...t.card, padding: '0.8rem', display: 'grid', gap: '0.35rem' },
   summaryHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' },
+  resultTitle: { fontSize: '0.82rem', fontWeight: 700, color: t.colors.textPrimary },
   meta: { display: 'block', fontSize: '0.8rem', color: t.colors.textSecondary },
 };
