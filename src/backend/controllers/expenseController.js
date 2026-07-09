@@ -297,13 +297,9 @@ exports.myExpenses = async (req, res) => {
 exports.submitPayment = async (req, res) => {
   try {
     const { unitExpenseId } = req.params;
-    const unit = await Expense.findUnitExpenseById(unitExpenseId);
+    const unit = await Expense.findPayableUnitExpenseForUser(unitExpenseId, req.user.id, req.communityId);
     if (!unit) return res.status(404).json({ error: 'Registro de expensa no encontrado' });
     if (unit.status !== 'pending') return res.status(400).json({ error: 'Esta expensa ya fue pagada o está en revisión' });
-    const user = await require('../models/User').User.findById(req.user.id);
-    if (!user || user.community_id !== req.communityId || user.unit_number !== unit.unit_number || unit.community_id !== req.communityId) {
-      return res.status(403).json({ error: 'No podés pagar expensas de otra unidad' });
-    }
     let payment_proof_url = null;
     if (req.file) payment_proof_url = `/uploads/${req.file.filename}`;
     const updated = await Expense.updateUnitStatus(unitExpenseId, 'in_review', payment_proof_url);

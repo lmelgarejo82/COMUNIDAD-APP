@@ -186,6 +186,31 @@ const Expense = {
     return rows[0] || null;
   },
 
+  async findPayableUnitExpenseForUser(id, userId, communityId) {
+    const { rows } = await pool.query(
+      `SELECT ue.*, e.description, e.due_date, e.community_id
+       FROM unit_expenses ue
+       JOIN expenses e ON ue.expense_id = e.id
+       JOIN users u ON u.id = $2
+       WHERE ue.id = $1
+         AND e.community_id = $3
+         AND u.community_id = e.community_id
+         AND e.deleted_at IS NULL
+         AND (
+           (ue.unit_id IS NOT NULL AND EXISTS (
+             SELECT 1
+             FROM unit_ownerships uo
+             WHERE uo.unit_id = ue.unit_id
+               AND uo.user_id = u.id
+               AND (uo.end_date IS NULL OR uo.end_date > NOW())
+           ))
+           OR (ue.unit_id IS NULL AND u.unit_number = ue.unit_number)
+         )`,
+      [id, userId, communityId]
+    );
+    return rows[0] || null;
+  },
+
   async updateUnitStatus(id, status, payment_proof_url = null) {
     const setFields = ['status = $2'];
     const params = [id, status];
@@ -199,9 +224,9 @@ const Expense = {
   async confirmUnitExpense(id) {
     const { rows } = await pool.query(
       `UPDATE unit_expenses SET status = 'paid', confirmed_at = NOW(), paid_at = COALESCE(paid_at, NOW())
-       WHERE id = $1 RETURNING *`, [id]
+       WHERE id = $1 AND status != 'paid' RETURNING *`, [id]
     );
-    return rows[0];
+    return rows[0] || null;
   },
 
   async findUnitExpenseWithCommunity(id) {
@@ -209,6 +234,30 @@ const Expense = {
       `SELECT ue.*, e.community_id AS expense_community_id
        FROM unit_expenses ue JOIN expenses e ON ue.expense_id = e.id
        WHERE ue.id = $1`, [id]
+    );
+    return rows[0] || null;
+  },
+
+  async findOwnerForUnitExpense(id) {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.email
+       FROM unit_expenses ue
+       JOIN expenses e ON ue.expense_id = e.id
+       JOIN users u ON u.community_id = e.community_id
+       WHERE ue.id = $1
+         AND (
+           (ue.unit_id IS NOT NULL AND EXISTS (
+             SELECT 1
+             FROM unit_ownerships uo
+             WHERE uo.unit_id = ue.unit_id
+               AND uo.user_id = u.id
+               AND (uo.end_date IS NULL OR uo.end_date > NOW())
+           ))
+           OR (ue.unit_id IS NULL AND u.unit_number = ue.unit_number)
+         )
+       ORDER BY u.id
+       LIMIT 1`,
+      [id]
     );
     return rows[0] || null;
   },

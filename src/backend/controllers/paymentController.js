@@ -1,7 +1,9 @@
+const crypto = require('crypto');
 const { MercadoPagoConfig, Preference } = require('mercadopago');
 const { Expense } = require('../models/Expense');
 const { PaymentTransaction } = require('../models/PaymentTransaction');
 const { Notification } = require('../models/Notification');
+const { invalidatePattern } = require('../cache');
 
 function getClient() {
   const accessToken = process.env.MP_ACCESS_TOKEN;
@@ -11,6 +13,10 @@ function getClient() {
   return new MercadoPagoConfig({ accessToken });
 }
 
+function createExternalReference() {
+  return `pt-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+}
+
 exports.createPreference = async (req, res) => {
   try {
     const { unitExpenseId } = req.body;
@@ -18,7 +24,7 @@ exports.createPreference = async (req, res) => {
       return res.status(400).json({ error: 'unitExpenseId es requerido' });
     }
 
-    const unit = await Expense.findUnitExpenseById(unitExpenseId);
+    const unit = await Expense.findPayableUnitExpenseForUser(unitExpenseId, req.user.id, req.communityId);
     if (!unit) {
       return res.status(404).json({ error: 'Expensa no encontrada' });
     }
@@ -27,16 +33,11 @@ exports.createPreference = async (req, res) => {
       return res.status(400).json({ error: 'Esta expensa ya fue pagada o está en revisión' });
     }
 
-    const user = await require('../models/User').User.findById(req.user.id);
-    if (!user || user.community_id !== req.communityId || user.unit_number !== unit.unit_number || unit.community_id !== req.communityId) {
-      return res.status(403).json({ error: 'No podés pagar expensas de otra unidad' });
-    }
-
     const client = getClient();
     const preference = new Preference(client);
 
     const amount = parseFloat(unit.amount_owed).toFixed(2);
-    const externalRef = `expense-${unitExpenseId}-${Date.now()}`;
+    const externalRef = createExternalReference();
 
     const result = await preference.create({
       body: {
@@ -82,14 +83,44 @@ exports.createPreference = async (req, res) => {
   }
 };
 
+async function confirmApprovedTransaction(tx, paymentId, payment) {
+  const unit = await Expense.findUnitExpenseById(tx.unit_expense_id);
+  if (!unit) {
+    await PaymentTransaction.updateStatusById(tx.id, 'orphaned', paymentId, payment);
+    return { confirmed: false, reason: 'unit_expense_not_found' };
+  }
+
+  if (payment.transaction_amount !== undefined && Number(payment.transaction_amount) !== Number(unit.amount_owed)) {
+    await PaymentTransaction.updateStatusById(tx.id, 'amount_mismatch', paymentId, payment);
+    return { confirmed: false, reason: 'amount_mismatch' };
+  }
+
+  const updatedTx = await PaymentTransaction.updateStatusById(tx.id, 'approved', paymentId, payment);
+  const confirmed = await Expense.confirmUnitExpense(tx.unit_expense_id);
+
+  if (confirmed) {
+    const user = await Expense.findOwnerForUnitExpense(tx.unit_expense_id);
+    if (user) {
+      await Notification.create({
+        user_id: user.id,
+        type: 'payment',
+        title: 'Pago confirmado',
+        message: `Tu pago de $${parseFloat(unit.amount_owed).toFixed(2)} fue aprobado automáticamente.`,
+        reference_id: tx.unit_expense_id,
+      });
+    }
+    invalidatePattern('dashboard:*').catch(() => {});
+  }
+
+  return { confirmed: Boolean(confirmed), tx: updatedTx };
+}
+
 exports.webhook = async (req, res) => {
   try {
     const { type, data, action } = req.body;
 
-    // MercadoPago siempre responde 200 OK primero
-    if (type === 'payment' && action === 'payment.created') {
+    if (type === 'payment' && data?.id) {
       const paymentId = data?.id;
-      if (!paymentId) return res.sendStatus(200);
 
       console.log(`[MP Webhook] Pago recibido: ${paymentId}`);
 
@@ -99,32 +130,22 @@ exports.webhook = async (req, res) => {
 
       const payment = await paymentApi.get({ id: paymentId });
 
+      const existingByPaymentId = await PaymentTransaction.findByPaymentId(paymentId);
+      if (existingByPaymentId && payment.status === 'approved') {
+        await confirmApprovedTransaction(existingByPaymentId, paymentId, payment);
+        return res.sendStatus(200);
+      }
+
+      const externalRef = payment.external_reference;
+      if (!externalRef) return res.sendStatus(200);
+
+      const tx = await PaymentTransaction.findByExternalReference(externalRef);
+      if (!tx) return res.sendStatus(200);
+
       if (payment.status === 'approved') {
-        const externalRef = payment.external_reference;
-        const [prefix, unitExpenseId, timestamp] = (externalRef || '').split('-');
-
-        if (prefix === 'expense' && unitExpenseId) {
-          const tx = await PaymentTransaction.findByPreferenceId(payment.id);
-          await PaymentTransaction.updateStatus(payment.id, 'approved', String(paymentId), payment);
-
-          if (tx) {
-            const unit = await Expense.findUnitExpenseById(tx.unit_expense_id);
-            await Expense.confirmUnitExpense(tx.unit_expense_id);
-
-            if (unit) {
-              const user = await require('../models/User').User.findByUnit(unit.community_id, unit.unit_number);
-              if (user) {
-                await Notification.create({
-                  user_id: user.id,
-                  type: 'payment',
-                  title: 'Pago confirmado',
-                  message: `Tu pago de $${parseFloat(unit.amount_owed).toFixed(2)} fue aprobado automáticamente.`,
-                  reference_id: tx.unit_expense_id,
-                });
-              }
-            }
-          }
-        }
+        await confirmApprovedTransaction(tx, paymentId, payment);
+      } else {
+        await PaymentTransaction.updateStatusById(tx.id, payment.status || 'unknown', paymentId, payment);
       }
     }
 
@@ -134,3 +155,5 @@ exports.webhook = async (req, res) => {
     res.sendStatus(500);
   }
 };
+
+exports._private = { createExternalReference, confirmApprovedTransaction };
