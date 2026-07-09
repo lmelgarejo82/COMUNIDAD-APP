@@ -310,3 +310,50 @@ test('resident cannot access visitor digital invitations', async () => {
 
   assert.equal(result.status, 403);
 });
+
+test('access_operator can validate visitor digital invitation token', async () => {
+  const result = await requestRoute({
+    routeFile: '../routes/accessInvitations',
+    controllerFile: '../controllers/accessInvitationValidationController',
+    controllerExports: {
+      validate(req, res) { res.json({ ok: true }); },
+      use(req, res) { res.json({ ok: true }); },
+    },
+    role: 'access_operator',
+    method: 'POST',
+    path: '/validate',
+  });
+
+  assert.equal(result.status, 200);
+});
+
+test('access_operator can use visitor digital invitation token', async () => {
+  const result = await requestRoute({
+    routeFile: '../routes/accessInvitations',
+    controllerFile: '../controllers/accessInvitationValidationController',
+    controllerExports: {
+      validate(req, res) { res.json({ ok: true }); },
+      use(req, res) { res.json({ ok: true }); },
+    },
+    role: 'access_operator',
+    method: 'POST',
+    path: '/use',
+  });
+
+  assert.equal(result.status, 200);
+});
+
+test('resident cannot validate visitor digital invitation token', async () => {
+  const result = await requestRoute({
+    routeFile: '../routes/accessInvitations',
+    controllerFile: '../controllers/accessInvitationValidationController',
+    controllerExports: {
+      validate(req, res) { res.json({ ok: true }); },
+    },
+    role: 'residente',
+    method: 'POST',
+    path: '/validate',
+  });
+
+  assert.equal(result.status, 403);
+});

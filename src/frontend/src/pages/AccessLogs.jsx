@@ -9,6 +9,7 @@ import AccessVisitorList from '../components/access/AccessVisitorList';
 import CheckInPanel from '../components/access/CheckInPanel';
 import VisitDetailPanel from '../components/access/VisitDetailPanel';
 import ConfirmCheckoutModal from '../components/access/ConfirmCheckoutModal';
+import ValidateInvitationPanel from '../components/access/ValidateInvitationPanel';
 import PreauthorizationAdminPanel from '../components/access/preauthorizations/PreauthorizationAdminPanel';
 import {
   preauthInitialFilters,
@@ -26,6 +27,7 @@ export default function AccessLogs() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [invitationOpen, setInvitationOpen] = useState(false);
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [preauthOpen, setPreauthOpen] = useState(false);
   const [preauths, setPreauths] = useState([]);
@@ -94,6 +96,12 @@ export default function AccessLogs() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleInvitationUsed(data) {
+    setMessage(data.message);
+    await load();
+    if (preauthOpen) await loadPreauthorizations();
   }
 
   async function loadPreauthorizations() {
@@ -227,6 +235,9 @@ export default function AccessLogs() {
           <span style={t.font.subtitle}>Bitácora de visitantes, ingresos y salidas.</span>
         </div>
         <div style={styles.headerActions}>
+          <button type="button" onClick={() => setInvitationOpen(true)} style={t.secondaryBtn}>
+            Validar invitación
+          </button>
           {user?.role === 'admin' && (
             <button
               type="button"
@@ -287,6 +298,11 @@ export default function AccessLogs() {
         onSubmit={handleCheckIn}
         onUsePreauthorization={handleUsePreauthorization}
         saving={saving}
+      />
+      <ValidateInvitationPanel
+        open={invitationOpen}
+        onClose={() => setInvitationOpen(false)}
+        onUsed={handleInvitationUsed}
       />
       <VisitDetailPanel
         visit={detailVisit}

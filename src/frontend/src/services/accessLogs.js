@@ -50,3 +50,12 @@ export const accessPreauthorizationService = {
     return api.post(`/access-preauthorizations/${id}/invitations/${invitationId}/revoke`);
   },
 };
+
+export const accessInvitationService = {
+  validate(token) {
+    return api.post('/access-invitations/validate', { token });
+  },
+  use(token) {
+    return api.post('/access-invitations/use', { token });
+  },
+};
