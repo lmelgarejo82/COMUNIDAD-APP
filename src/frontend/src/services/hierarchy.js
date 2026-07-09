@@ -9,6 +9,7 @@ export const hierarchyService = {
   getBuildings: () => api.get('/hierarchy/buildings'),
   getFloors: (buildingId) => api.get('/hierarchy/floors', { params: { buildingId } }),
   getUnits: (filters) => api.get('/hierarchy/units', { params: filters }),
+  searchUnits: (params) => api.get('/hierarchy/units/search', { params }),
   createBuilding: (data) => api.post('/hierarchy/buildings', data),
   updateBuilding: (id, data) => api.put(`/hierarchy/buildings/${id}`, data),
   deleteBuilding: (id) => api.delete(`/hierarchy/buildings/${id}`),

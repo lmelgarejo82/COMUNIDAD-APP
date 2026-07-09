@@ -72,6 +72,71 @@ const Hierarchy = {
     return rows;
   },
 
+  async searchUnits(communityId, { q = '', complexId = null, limit = 20 } = {}, client = null) {
+    const db = getQuery(client);
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 20);
+    const params = [communityId];
+    const conditions = [
+      'cx.community_id = $1',
+      'cx.deleted_at IS NULL',
+      'COALESCE(u.is_active, TRUE) = TRUE',
+    ];
+    let paramIdx = 2;
+
+    if (complexId) {
+      conditions.push(`cx.id = $${paramIdx++}`);
+      params.push(complexId);
+    }
+
+    const search = String(q || '').trim();
+    if (search) {
+      conditions.push(`(
+        u.unit_code ILIKE $${paramIdx}
+        OR COALESCE(f.name, '') ILIKE $${paramIdx}
+        OR CAST(f.number AS TEXT) ILIKE $${paramIdx}
+        OR b.name ILIKE $${paramIdx}
+        OR cx.name ILIKE $${paramIdx}
+        OR CONCAT_WS(' ', b.name, f.name, f.number, u.unit_code, cx.name) ILIKE $${paramIdx}
+        OR CONCAT_WS(' ', b.name, f.number, u.unit_code, cx.name) ILIKE $${paramIdx}
+      )`);
+      params.push(`%${search}%`);
+      paramIdx += 1;
+    }
+
+    params.push(safeLimit);
+
+    const { rows } = await db.query(
+      `SELECT
+         u.id AS unit_id,
+         u.unit_code,
+         u.unit_code AS unit_label,
+         f.name AS floor_name,
+         f.number AS floor_number,
+         b.name AS building_name,
+         cx.id AS complex_id,
+         cx.name AS complex_name,
+         CONCAT_WS(
+           ' · ',
+           b.name,
+           CASE
+             WHEN f.name IS NOT NULL AND f.name <> '' THEN f.name
+             ELSE 'Piso ' || f.number::text
+           END,
+           'Unidad ' || u.unit_code
+         ) AS display_path
+       FROM units u
+       JOIN floors f ON u.floor_id = f.id
+       JOIN buildings b ON f.building_id = b.id
+       JOIN complexes cx ON b.complex_id = cx.id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY cx.name, b.sort_order, b.name, f.sort_order, f.number, u.sort_order, u.unit_code
+       LIMIT $${paramIdx}`,
+      params
+    );
+
+    return rows;
+  },
+
   async getUnitTree(complexId, client = null) {
     if (client) return _getUnitTree(complexId, client);
     return cacheOrFetch(`hierarchy:tree:${complexId}`, CACHE_TTL.LONG, () => _getUnitTree(complexId));

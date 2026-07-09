@@ -8,6 +8,7 @@ const initialForm = {
   visitor_phone: '',
   vehicle_plate: '',
   visit_type: 'guest',
+  unit_id: null,
   destination_label: '',
   authorized_by: '',
   notes: '',
@@ -18,6 +19,19 @@ export default function CheckInPanel({ open, onClose, onSubmit, saving }) {
   if (!open) return null;
 
   const update = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+  const handleManualDestination = (value) => {
+    setForm(prev => ({ ...prev, unit_id: null, destination_label: value }));
+  };
+  const handleUnitSelect = (unit) => {
+    setForm(prev => ({
+      ...prev,
+      unit_id: unit.unit_id,
+      destination_label: unit.display_path || unit.unit_label,
+    }));
+  };
+  const handleUnitClear = () => {
+    setForm(prev => ({ ...prev, unit_id: null, destination_label: '' }));
+  };
   const submit = async (event) => {
     event.preventDefault();
     await onSubmit(form);
@@ -66,7 +80,13 @@ export default function CheckInPanel({ open, onClose, onSubmit, saving }) {
               <input value={form.vehicle_plate} onChange={(e) => update('vehicle_plate', e.target.value.toUpperCase())} style={t.input} />
             </label>
           </div>
-          <UnitSearchSelect value={form.destination_label} onChange={(value) => update('destination_label', value)} />
+          <UnitSearchSelect
+            value={form.destination_label}
+            selectedUnitId={form.unit_id}
+            onManualChange={handleManualDestination}
+            onSelect={handleUnitSelect}
+            onClear={handleUnitClear}
+          />
           <label>
             <span style={t.font.label}>Autorizado por</span>
             <input value={form.authorized_by} onChange={(e) => update('authorized_by', e.target.value)} placeholder="Residente, operador o administración" style={t.input} />

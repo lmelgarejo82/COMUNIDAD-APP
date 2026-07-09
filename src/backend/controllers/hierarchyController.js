@@ -353,6 +353,32 @@ exports.getUnits = async (req, res) => {
   }
 };
 
+exports.searchUnits = async (req, res) => {
+  try {
+    const queryComplexId = req.query.complex ? parsePositiveInt(req.query.complex) : null;
+    const complexId = queryComplexId || req.complexId || null;
+
+    if (req.query.complex && !queryComplexId) {
+      return res.status(400).json({ error: 'complex inválido' });
+    }
+
+    if (complexId && !(await validateComplexOwnership(req.communityId, complexId))) {
+      return res.status(403).json({ error: 'El complejo no pertenece a tu comunidad' });
+    }
+
+    const units = await Hierarchy.searchUnits(req.communityId, {
+      q: req.query.q || '',
+      complexId,
+      limit: req.query.limit,
+    });
+
+    res.json({ data: units });
+  } catch (err) {
+    console.error('Error en searchUnits:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 exports.createUnit = async (req, res) => {
   try {
     const { floor_id, unit_code, unit_type, area_m2, coef_percent, sort_order } = req.body;

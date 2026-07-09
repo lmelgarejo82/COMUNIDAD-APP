@@ -22,6 +22,8 @@ function loadController({
   trees = {},
   verifyAdminAccess = async () => false,
   onGetUnitTree = () => {},
+  onSearchUnits = () => {},
+  searchUnitsResult = [],
 } = {}) {
   delete require.cache[controllerPath];
 
@@ -33,6 +35,10 @@ function loadController({
       async getUnitTree(complexId) {
         onGetUnitTree(complexId);
         return trees[complexId] || null;
+      },
+      async searchUnits(communityId, filters) {
+        onSearchUnits(communityId, filters);
+        return searchUnitsResult;
       },
     },
   });
@@ -147,4 +153,84 @@ test('admin complexes endpoint returns allowed complexes with community scope me
     { id: 10, name: 'Complejo A', community_id: 1, community_name: 'Consorcio Norte', organization_id: 100, organization_name: 'Grupo Norte' },
     { id: 20, name: 'Complejo B', community_id: 2, community_name: 'Consorcio Sur', organization_id: 200, organization_name: 'Grupo Sur' },
   ]);
+});
+
+test('unit autocomplete searches using validated request community context', async () => {
+  let receivedCommunityId = null;
+  let receivedFilters = null;
+  const { searchUnits } = loadController({
+    complexes: [{ id: 10, community_id: 1 }],
+    searchUnitsResult: [{ unit_id: 1, unit_code: '01A', display_path: 'Torre A · Piso 1 · Unidad 01A' }],
+    onSearchUnits: (communityId, filters) => {
+      receivedCommunityId = communityId;
+      receivedFilters = filters;
+    },
+  });
+  const res = createResponse();
+
+  await searchUnits({ user: { id: 5, role: 'admin' }, communityId: 1, complexId: 10, query: { q: '01A' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(receivedCommunityId, 1);
+  assert.equal(receivedFilters.q, '01A');
+  assert.equal(receivedFilters.complexId, 10);
+  assert.equal(res.body.data[0].unit_code, '01A');
+});
+
+test('unit autocomplete rejects a complex outside validated community', async () => {
+  let searched = false;
+  const { searchUnits } = loadController({
+    complexes: [{ id: 10, community_id: 1 }],
+    onSearchUnits: () => { searched = true; },
+  });
+  const res = createResponse();
+
+  await searchUnits({ user: { id: 5, role: 'admin' }, communityId: 1, query: { complex: '99', q: 'A' } }, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(searched, false);
+  assert.deepEqual(res.body, { error: 'El complejo no pertenece a tu comunidad' });
+});
+
+test('unit autocomplete can return matches by unit code and route metadata', async () => {
+  const { searchUnits } = loadController({
+    complexes: [{ id: 10, community_id: 1 }],
+    searchUnitsResult: [
+      {
+        unit_id: 7,
+        unit_code: '2B',
+        unit_label: '2B',
+        floor_name: null,
+        building_name: 'Torre A',
+        complex_id: 10,
+        complex_name: 'Complejo Norte',
+        display_path: 'Torre A · Piso 2 · Unidad 2B',
+      },
+    ],
+  });
+  const res = createResponse();
+
+  await searchUnits({ user: { id: 5, role: 'admin' }, communityId: 1, query: { q: 'Torre A 2' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.data[0].unit_id, 7);
+  assert.equal(res.body.data[0].display_path, 'Torre A · Piso 2 · Unidad 2B');
+});
+
+test('unit autocomplete forwards requested limit with safe community scope', async () => {
+  let receivedFilters = null;
+  const { searchUnits } = loadController({
+    complexes: [{ id: 10, community_id: 1 }],
+    onSearchUnits: (communityId, filters) => {
+      assert.equal(communityId, 1);
+      receivedFilters = filters;
+    },
+  });
+  const res = createResponse();
+
+  await searchUnits({ user: { id: 5, role: 'admin' }, communityId: 1, complexId: 10, query: { limit: '50' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(receivedFilters.limit, '50');
+  assert.equal(receivedFilters.complexId, 10);
 });
