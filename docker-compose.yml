@@ -16,6 +16,17 @@ services:
       timeout: 3s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build: ./src/backend
     restart: unless-stopped
@@ -29,8 +40,12 @@ services:
       EMAIL_USER: ''
       EMAIL_PASS: ''
       SEED_DB: 'false'
+      QUEUE_ENABLED: ${QUEUE_ENABLED:-true}
+      REDIS_URL: redis://redis:6379
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - '3000:3000'

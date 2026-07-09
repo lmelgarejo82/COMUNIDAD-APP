@@ -1,18 +1,55 @@
-const Bull = require('bull');
 const { pool } = require('../db');
 const { Notification } = require('../models/Notification');
 const whatsapp = require('../services/whatsapp');
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 const WHATSAPP_RATE_MS = parseInt(process.env.WHATSAPP_RATE_MS || '350', 10);
 const NOTIFY_CONCURRENCY = parseInt(process.env.NOTIFY_CONCURRENCY || '5', 10);
 
 let queue = null;
 let queueReady = false;
+let initialized = false;
+let disabledLogged = false;
+
+function isQueueEnabled() {
+  return process.env.QUEUE_ENABLED === 'true';
+}
+
+function getRedisUrl() {
+  return process.env.REDIS_URL || null;
+}
+
+function disabledResult(masterId, reason = 'queue_disabled') {
+  return {
+    id: null,
+    disabled: true,
+    skipped: true,
+    masterId,
+    reason,
+  };
+}
 
 function createQueue() {
+  if (!isQueueEnabled()) {
+    if (!disabledLogged) {
+      console.log('[master-ticket] Queue disabled (QUEUE_ENABLED=false). Sub-ticket generation will be skipped.');
+      disabledLogged = true;
+    }
+    queue = null;
+    queueReady = false;
+    return null;
+  }
+
   try {
-    queue = new Bull('generate-subtickets', REDIS_URL, {
+    const redisUrl = getRedisUrl();
+    if (!redisUrl) {
+      console.warn('[master-ticket] QUEUE_ENABLED=true but REDIS_URL is not configured. Queue disabled.');
+      queue = null;
+      queueReady = false;
+      return null;
+    }
+
+    const Bull = require('bull');
+    queue = new Bull('generate-subtickets', redisUrl, {
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },
@@ -221,19 +258,30 @@ async function processJob(job) {
 }
 
 async function enqueueGeneration(masterId) {
-  if (!queue) {
-    console.warn(`[master-ticket] Bull no disponible. Ejecutando sincrónicamente master ${masterId}.`);
-    try {
-      return await processJob({ data: { masterId } });
-    } catch (err) {
-      throw err;
+  if (!isQueueEnabled()) {
+    if (!disabledLogged) {
+      console.log('[master-ticket] Queue disabled (QUEUE_ENABLED=false). Skipping enqueue.');
+      disabledLogged = true;
     }
+    return disabledResult(masterId);
   }
+
+  if (!queue) {
+    createQueue();
+  }
+
+  if (!queue) {
+    return disabledResult(masterId, getRedisUrl() ? 'queue_unavailable' : 'redis_url_missing');
+  }
+
   return queue.add({ masterId }, { jobId: `master-${masterId}-${Date.now()}` });
 }
 
 function init() {
+  if (initialized) return queue;
+  initialized = true;
   createQueue();
+  return queue;
 }
 
-module.exports = { enqueueGeneration, init };
+module.exports = { enqueueGeneration, init, _private: { isQueueEnabled, getRedisUrl, disabledResult } };

@@ -192,6 +192,9 @@ const MasterTicket = {
   async enqueueSubTicketGeneration(masterId) {
     try {
       const job = await enqueueGeneration(masterId);
+      if (job?.disabled) {
+        return { enqueued: false, disabled: true, reason: job.reason };
+      }
       return { enqueued: true, jobId: job?.id || null, units: job?.units };
     } catch (err) {
       console.error('Error enqueuing sub-ticket generation:', err);
