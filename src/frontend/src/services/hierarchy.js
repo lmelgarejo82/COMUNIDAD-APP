@@ -1,0 +1,27 @@
+import api from './api';
+
+export const hierarchyService = {
+  getTree: (complexId) => api.get('/hierarchy/tree', { params: complexId ? { complexId } : {} }),
+  getComplexes: () => api.get('/hierarchy/complexes'),
+  createComplex: (data) => api.post('/hierarchy/complexes', data),
+  updateComplex: (id, data) => api.put(`/hierarchy/complexes/${id}`, data),
+  deleteComplex: (id) => api.delete(`/hierarchy/complexes/${id}`),
+  getBuildings: () => api.get('/hierarchy/buildings'),
+  getFloors: (buildingId) => api.get('/hierarchy/floors', { params: { buildingId } }),
+  getUnits: (filters) => api.get('/hierarchy/units', { params: filters }),
+  createBuilding: (data) => api.post('/hierarchy/buildings', data),
+  updateBuilding: (id, data) => api.put(`/hierarchy/buildings/${id}`, data),
+  deleteBuilding: (id) => api.delete(`/hierarchy/buildings/${id}`),
+  moveBuilding: (id, new_complex_id) => api.patch(`/hierarchy/buildings/${id}/move`, { new_complex_id }),
+  createFloor: (data) => api.post('/hierarchy/floors', data),
+  updateFloor: (id, data) => api.put(`/hierarchy/floors/${id}`, data),
+  deleteFloor: (id) => api.delete(`/hierarchy/floors/${id}`),
+  moveFloor: (id, new_building_id) => api.patch(`/hierarchy/floors/${id}/move`, { new_building_id }),
+  createUnit: (data) => api.post('/hierarchy/units', data),
+  updateUnit: (id, data) => api.put(`/hierarchy/units/${id}`, data),
+  deleteUnit: (id) => api.delete(`/hierarchy/units/${id}`),
+  moveUnit: (id, new_floor_id) => api.patch(`/hierarchy/units/${id}/move`, { new_floor_id }),
+  reorganizeUnits: (entries) => api.put('/hierarchy/units/reorganize', { entries }),
+  bulkCreate: (data) => api.post('/hierarchy/bulk', data),
+  moveNode: (data) => api.put('/hierarchy/move', data),
+};

@@ -1,0 +1,18 @@
+CREATE TABLE IF NOT EXISTS expensas (
+  id SERIAL PRIMARY KEY,
+  community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+  description VARCHAR(255) NOT NULL,
+  amount DECIMAL(10, 2) NOT NULL,
+  due_date DATE NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS pagos (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expensa_id INTEGER NOT NULL REFERENCES expensas(id) ON DELETE CASCADE,
+  amount DECIMAL(10, 2) NOT NULL,
+  paid_at TIMESTAMP DEFAULT NOW(),
+  confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE(user_id, expensa_id)
+);
