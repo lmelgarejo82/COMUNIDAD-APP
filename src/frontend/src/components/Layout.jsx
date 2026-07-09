@@ -74,7 +74,7 @@ export default function Layout() {
     { to: '/expensas', label: 'Expensas' },
     { to: '/anuncios', label: 'Anuncios' },
     { to: '/tickets', label: 'Tickets' },
-    ...(isAdmin ? [{ to: '/invite', label: 'Invitar' }, { to: '/unidades', label: 'Unidades' }, { to: '/estructura', label: 'Estructura' }, { to: '/admin/estructura', label: 'Editor' }, { to: '/audit', label: 'Historial' }] : []),
+    ...(isAdmin ? [{ to: '/invite', label: 'Invitar' }, { to: '/estructura', label: 'Estructura' }, { to: '/audit', label: 'Historial' }] : []),
     { to: '/amenities', label: 'Amenities' },
     { to: '/documents', label: 'Documentos' },
   ];

@@ -12,6 +12,28 @@ async function validateComplexOwnership(communityId, complexId) {
   return complexes.some(c => c.id === complexId);
 }
 
+function parsePositiveInt(value) {
+  if (!/^\d+$/.test(String(value))) return null;
+  const parsed = parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function validateTreeComplexAccess(req, complexId) {
+  if (!(await validateComplexOwnership(req.communityId, complexId))) {
+    return false;
+  }
+
+  if (req.user.role !== 'admin') {
+    return true;
+  }
+
+  if (req.complexId === complexId) {
+    return true;
+  }
+
+  return AdminComplex.verifyAdminAccess(req.user.id, complexId);
+}
+
 async function validateBuildingOwnership(communityId, buildingId) {
   const building = await Hierarchy.getBuildingById(buildingId);
   if (!building) return false;
@@ -43,15 +65,24 @@ async function validateUnitOwnership(communityId, unitId) {
 
 exports.tree = async (req, res) => {
   try {
-    const { complexId } = req.query;
+    const requestedComplexId = req.complexId || (req.query.complexId ? parsePositiveInt(req.query.complexId) : null);
     let complexes;
-    if (complexId) {
-      // Load a specific complex (anyone with access can use ?complexId=X)
-      const tree = await Hierarchy.getUnitTree(parseInt(complexId));
+
+    if (req.query.complexId && !requestedComplexId) {
+      return res.status(400).json({ error: 'Contexto de complejo inválido' });
+    }
+
+    if (requestedComplexId) {
+      if (!(await validateTreeComplexAccess(req, requestedComplexId))) {
+        return res.status(403).json({ error: 'No tenés acceso a este complejo' });
+      }
+      const tree = await Hierarchy.getUnitTree(requestedComplexId);
       return res.json(tree ? [tree] : []);
     }
+
     if (req.user.role === 'admin') {
-      complexes = await AdminComplex.findComplexesByAdmin(req.user.id);
+      complexes = (await AdminComplex.findComplexesByAdmin(req.user.id))
+        .filter(c => c.community_id === req.communityId);
     } else {
       complexes = await Hierarchy.getComplexes(req.communityId);
     }

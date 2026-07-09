@@ -16,7 +16,7 @@ api.interceptors.request.use((config) => {
     if (user.role === 'admin') {
       const complexId = localStorage.getItem('selectedComplex');
       const params = config.params || {};
-      const hasOwnId = typeof params === 'object' && (params.complexId || params.complex_id);
+      const hasOwnId = typeof params === 'object' && (params.complex || params.complexId || params.complex_id);
       if (complexId && !hasOwnId) {
         config.params = { ...params, complex: complexId };
       }

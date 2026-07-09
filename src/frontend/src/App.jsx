@@ -13,8 +13,6 @@ import InviteResidente from './pages/InviteResidente';
 import Audit from './pages/Audit';
 import Amenities from './pages/Amenities';
 import Documents from './pages/Documents';
-import AdminUnidades from './pages/AdminUnidades';
-import AdminEstructura from './pages/AdminEstructura';
 import HierarchyEditor from './pages/HierarchyEditor';
 
 function App() {
@@ -40,9 +38,9 @@ function App() {
               <Route path="/audit" element={<Audit />} />
               <Route path="/amenities" element={<Amenities />} />
               <Route path="/documents" element={<Documents />} />
-              <Route path="/unidades" element={<AdminUnidades />} />
-              <Route path="/estructura" element={<AdminEstructura />} />
-              <Route path="/admin/estructura" element={<HierarchyEditor />} />
+              <Route path="/estructura" element={<HierarchyEditor />} />
+              <Route path="/admin/estructura" element={<Navigate to="/estructura" replace />} />
+              <Route path="/unidades" element={<Navigate to="/estructura" replace />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { DndContext, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { useCommunity } from '../context/CommunityContext';
+import { useAuth } from '../context/AuthContext';
 import { hierarchyService } from '../services/hierarchy';
 import { getErrorMessage } from '../services/errors';
 import Spinner from '../components/Spinner';
@@ -10,18 +11,21 @@ import CompactView from '../components/hierarchy/CompactView';
 import EditView from '../components/hierarchy/EditView';
 import EditModal from '../components/hierarchy/EditModal';
 import BulkCreateModal from '../components/hierarchy/BulkCreateModal';
+import ClassicView from '../components/hierarchy/ClassicView';
 import t from '../theme';
 
 const VALID_DROPS = { complex: 'building', building: 'floor', floor: 'unit' };
 const TARGET_PARENT = { building: 'complex', floor: 'building', unit: 'floor' };
 
 const MODES = [
-  { key: 'tree', label: '\u2630 Estructura', icon: '\uD83D\uDCCB' },
-  { key: 'compact', label: '\u25A2 Compacto', icon: '\uD83C\uDFE2' },
-  { key: 'edit', label: '\u25A3 Edicin', icon: '\u270F' },
+  { key: 'tree', label: 'Arbol' },
+  { key: 'compact', label: 'Compacto' },
+  { key: 'classic', label: 'ABM clasico' },
+  { key: 'edit', label: 'Edicion visual' },
 ];
 
 export default function HierarchyEditor() {
+  const { user } = useAuth();
   const { complexes, selectedId, setSelectedId, fetchComplexes } = useCommunity();
   const [tree, setTree] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -31,6 +35,7 @@ export default function HierarchyEditor() {
   const [bulk, setBulk] = useState(null);
   const [del, setDel] = useState(null);
   const [activeDrag, setActiveDrag] = useState(null);
+  const canCreateComplex = user?.is_super_admin === true;
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -54,7 +59,7 @@ export default function HierarchyEditor() {
 
   function setModeAndSave(m) { localStorage.setItem('hierarchyMode', m); setMode(m); }
 
-  // ─── Drag & Drop (modo edicin) ───────────────────────────────────
+  // Drag & Drop (modo edicion)
 
   function handleDragStart(event) { setActiveDrag(event.active); }
 
@@ -96,21 +101,35 @@ export default function HierarchyEditor() {
     }
   }
 
-  // ─── Editar ──────────────────────────────────────────────────────
+  // Crear / editar
 
   function openEdit(nodeType, node) { setEdit({ type: nodeType, node }); }
+  function openCreate(nodeType, parentNode) { setEdit({ type: nodeType, node: {}, parentNode }); }
 
   async function handleEditSave(nodeType, data, node) {
     try {
-      if (nodeType === 'complex') await hierarchyService.updateComplex(node.id, data);
+      if (!node?.id) {
+        const parent = edit?.parentNode;
+        if (nodeType === 'complex') {
+          await hierarchyService.createComplex(data);
+          await fetchComplexes();
+        } else if (nodeType === 'building') {
+          await hierarchyService.createBuilding({ ...data, complex_id: parent?.id || tree?.id });
+        } else if (nodeType === 'floor') {
+          await hierarchyService.createFloor({ ...data, building_id: parent?.id });
+        } else if (nodeType === 'unit') {
+          await hierarchyService.createUnit({ ...data, floor_id: parent?.id });
+        }
+      } else if (nodeType === 'complex') await hierarchyService.updateComplex(node.id, data);
       else if (nodeType === 'building') await hierarchyService.updateBuilding(node.id, data);
       else if (nodeType === 'floor') await hierarchyService.updateFloor(node.id, data);
       else if (nodeType === 'unit') await hierarchyService.updateUnit(node.id, data);
-      showMsg('Guardado correctamente'); loadTree();
+      showMsg('Guardado correctamente');
+      loadTree();
     } catch (err) { throw err; }
   }
 
-  // ─── Eliminar ────────────────────────────────────────────────────
+  // Eliminar
 
   function openDelete(nodeType, node) { setDel({ type: nodeType, node }); }
 
@@ -126,7 +145,7 @@ export default function HierarchyEditor() {
     } catch (err) { showMsg(getErrorMessage(err, 'Error al eliminar'), 'error'); setDel(null); }
   }
 
-  // ─── Bulk ────────────────────────────────────────────────────────
+  // Creacion rapida
 
   function openBulk() { setBulk({ parentType: 'complex', parentNode: tree || null }); }
   function openAddChild(nodeType, node) { setBulk({ parentType: nodeType, parentNode: node }); }
@@ -144,7 +163,7 @@ export default function HierarchyEditor() {
     } catch (err) { throw err; }
   }
 
-  // ─── Render ──────────────────────────────────────────────────────
+  // Render
 
   if (loading && !tree) return <Spinner />;
   const isEdit = mode === 'edit';
@@ -158,7 +177,7 @@ export default function HierarchyEditor() {
           {/* ── Top Bar ── */}
           <div style={topBar}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: t.colors.textPrimary }}>Editor</h2>
+              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: t.colors.textPrimary }}>Estructura</h2>
               {complexes.length > 0 && (
                 <select style={selectStyle} value={selectedId || ''} onChange={e => setSelectedId(parseInt(e.target.value))}>
                   {complexes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -179,8 +198,11 @@ export default function HierarchyEditor() {
                 </button>
               ))}
               <button style={t.secondaryBtn} onClick={loadTree}>&#8635;</button>
+              {canCreateComplex && (
+                <button style={t.secondaryBtn} onClick={() => openCreate('complex', null)}>+ Complejo</button>
+              )}
               {tree && mode !== 'compact' && (
-                <button style={t.primaryBtn} onClick={openBulk}>+ Creacin Rpida</button>
+                <button style={t.primaryBtn} onClick={openBulk}>+ Creacion rapida</button>
               )}
               {msg && <span style={t.toast(msgType)}>{msg}</span>}
             </div>
@@ -196,6 +218,14 @@ export default function HierarchyEditor() {
                   {activeDrag ? <div style={dragGhost}>{activeDrag.data.current?.type || '...'}</div> : null}
                 </DragOverlay>
               </DndContext>
+            ) : mode === 'classic' ? (
+              <ClassicView
+                tree={tree}
+                canCreateComplex={canCreateComplex}
+                onCreate={openCreate}
+                onEdit={openEdit}
+                onDelete={openDelete}
+              />
             ) : mode === 'compact' ? (
               <CompactView tree={tree} />
             ) : (
@@ -219,9 +249,9 @@ export default function HierarchyEditor() {
       {del && (
         <div style={t.modal.overlay} onClick={() => setDel(null)}>
           <div style={t.modal.box} onClick={e => e.stopPropagation()}>
-            <h3 style={t.modal.title}>Confirmar eliminacin</h3>
+            <h3 style={t.modal.title}>Confirmar eliminacion</h3>
             <p style={{ margin: '0 0 0.5rem', fontSize: '0.85rem', color: t.colors.textSecondary }}>
-              Eliminar <strong>{del.node.name || del.node.unit_code || `#${del.node.id}`}</strong>? Esta accin es irreversible.
+              Eliminar <strong>{del.node.name || del.node.unit_code || `#${del.node.id}`}</strong>? Esta accion es irreversible.
             </p>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
               <button style={t.secondaryBtn} onClick={() => setDel(null)}>Cancelar</button>

@@ -1,7 +1,7 @@
 import api from './api';
 
 export const hierarchyService = {
-  getTree: (complexId) => api.get('/hierarchy/tree', { params: complexId ? { complexId } : {} }),
+  getTree: (complexId) => api.get('/hierarchy/tree', { params: complexId ? { complex: complexId } : {} }),
   getComplexes: () => api.get('/hierarchy/complexes'),
   createComplex: (data) => api.post('/hierarchy/complexes', data),
   updateComplex: (id, data) => api.put(`/hierarchy/complexes/${id}`, data),
