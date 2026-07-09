@@ -87,9 +87,11 @@ Después de correr el seed (`npm run db:seed` o `docker compose exec backend nod
 | `npm run dev:backend` | Solo backend (puerto 3000) |
 | `npm run dev:frontend` | Solo frontend (puerto 5173) |
 | `npm run install:all` | Instalar dependencias de los 3 packages |
-| `npm run db:migrate` | Ejecutar todas las migraciones |
+| `npm run db:migrate` | Ejecutar migraciones pendientes con historial en `schema_migrations` |
 | `npm run db:seed` | Sembrar datos de prueba |
 | `npm run db:setup` | Migrar + sembrar |
+
+Las migraciones se aplican en orden por nombre de archivo y se registran con checksum. Si una migración ya aplicada cambia, el runner aborta para evitar despliegues inconsistentes.
 
 ## Endpoints
 

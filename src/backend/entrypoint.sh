@@ -7,10 +7,7 @@ until pg_isready -h db -U postgres -d comunidad; do
 done
 
 echo "Ejecutando migraciones..."
-for f in migrations/*.sql; do
-  echo "  → $f"
-  PGPASSWORD=postgres psql -h db -U postgres -d comunidad -f "$f"
-done
+npm run db:migrate
 
 if [ "$SEED_DB" = "true" ]; then
   echo "Ejecutando seed..."
