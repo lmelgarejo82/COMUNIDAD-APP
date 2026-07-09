@@ -1,10 +1,31 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import t from '../../theme';
 import { accessInvitationService } from '../../services/accessLogs';
 
 function formatDateTime(value) {
   if (!value) return 'Sin horario definido';
   return new Date(value).toLocaleString('es-AR');
+}
+
+function extractInvitationToken(value) {
+  const input = String(value || '').trim();
+  if (!input) return '';
+
+  try {
+    const url = new URL(input);
+    const tokenParam = url.searchParams.get('token');
+    if (tokenParam) return tokenParam.trim();
+
+    const parts = url.pathname.split('/').filter(Boolean);
+    const invitationIndex = parts.findIndex((part) => part.toLowerCase() === 'invitacion');
+    if (invitationIndex >= 0 && parts[invitationIndex + 1]) {
+      return decodeURIComponent(parts[invitationIndex + 1]).trim();
+    }
+
+    return decodeURIComponent(parts.at(-1) || input).trim();
+  } catch {
+    return input;
+  }
 }
 
 export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
@@ -15,11 +36,24 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
   const [confirmed, setConfirmed] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [scannerStatus, setScannerStatus] = useState('idle');
+  const [scannerMessage, setScannerMessage] = useState('Escaneá el QR de la invitación o usá ingreso manual.');
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const scanFrameRef = useRef(null);
+  const scanningRef = useRef(false);
 
-  if (!open) return null;
+  useEffect(() => {
+    if (!open || mode !== 'scan') {
+      stopScanner();
+    }
 
-  async function validate() {
-    if (!token.trim()) {
+    return () => stopScanner();
+  }, [open, mode]);
+
+  async function validateToken(rawToken) {
+    const value = extractInvitationToken(rawToken);
+    if (!value) {
       setError('Ingresá el enlace o código de invitación.');
       return;
     }
@@ -29,7 +63,7 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
     setInvitation(null);
     setConfirmed(false);
     try {
-      const { data } = await accessInvitationService.validate(token);
+      const { data } = await accessInvitationService.validate(value);
       setInvitation(data.invitation);
       setMessage(data.invitation.status === 'used' ? 'Esta invitación ya fue utilizada.' : 'Invitación válida');
     } catch (err) {
@@ -37,6 +71,103 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function validate() {
+    await validateToken(token);
+  }
+
+  function stopScanner(nextStatus = 'idle') {
+    scanningRef.current = false;
+    if (scanFrameRef.current) {
+      cancelAnimationFrame(scanFrameRef.current);
+      scanFrameRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setScannerStatus(nextStatus);
+  }
+
+  async function startScanner() {
+    setScannerMessage('');
+    setMessage('');
+    setError('');
+    setInvitation(null);
+    setConfirmed(false);
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setScannerStatus('unsupported');
+      setScannerMessage('Cámara no disponible en este navegador. Usá ingreso manual.');
+      return;
+    }
+
+    if (!('BarcodeDetector' in window)) {
+      setScannerStatus('unsupported');
+      setScannerMessage('Este navegador todavía no permite leer QR desde cámara. Usá ingreso manual.');
+      return;
+    }
+
+    let detector;
+    try {
+      const supportedFormats = await window.BarcodeDetector.getSupportedFormats?.();
+      if (supportedFormats && !supportedFormats.includes('qr_code')) {
+        setScannerStatus('unsupported');
+        setScannerMessage('El lector de este navegador no soporta QR. Usá ingreso manual.');
+        return;
+      }
+      detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    } catch {
+      setScannerStatus('error');
+      setScannerMessage('No pudimos iniciar el lector QR. Usá ingreso manual.');
+      return;
+    }
+
+    try {
+      setScannerStatus('requesting');
+      setScannerMessage('Solicitando permiso de cámara...');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      scanningRef.current = true;
+      setScannerStatus('active');
+      setScannerMessage('Cámara activa. Enfocá el QR de la invitación.');
+      scanFrame(detector);
+    } catch (err) {
+      const denied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
+      stopScanner(denied ? 'denied' : 'error');
+      setScannerMessage(denied ? 'Permiso de cámara denegado. Usá ingreso manual.' : 'No pudimos abrir la cámara. Usá ingreso manual.');
+    }
+  }
+
+  async function scanFrame(detector) {
+    if (!scanningRef.current || !videoRef.current) return;
+    try {
+      const results = await detector.detect(videoRef.current);
+      const rawValue = results?.[0]?.rawValue?.trim();
+      if (rawValue) {
+        stopScanner('detected');
+        setScannerMessage('QR detectado. Validando invitación...');
+        setToken(rawValue);
+        await validateToken(rawValue);
+        return;
+      }
+    } catch {
+      stopScanner('error');
+      setScannerMessage('No pudimos leer el QR. Usá ingreso manual.');
+      return;
+    }
+    scanFrameRef.current = requestAnimationFrame(() => scanFrame(detector));
   }
 
   async function confirmUse() {
@@ -62,7 +193,10 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
     setConfirmed(false);
     setMessage('');
     setError('');
+    setScannerMessage('Escaneá el QR de la invitación o usá ingreso manual.');
   }
+
+  if (!open) return null;
 
   const canConfirm = invitation?.status === 'active';
   const alreadyUsed = invitation?.status === 'used' && message === 'Esta invitación ya fue utilizada.';
@@ -131,12 +265,51 @@ export default function ValidateInvitationPanel({ open, onClose, onUsed }) {
               </div>
             </section>
           ) : (
-            <section style={styles.scanPlaceholder}>
-              <strong>Escanear QR</strong>
-              <span>Escaneo por cámara próximamente. Usá ingreso manual.</span>
-              <button type="button" onClick={() => setMode('manual')} style={t.secondaryBtn}>
-                Usar ingreso manual
-              </button>
+            <section style={styles.scanBox}>
+              <div style={styles.scanHeader}>
+                <div>
+                  <strong>Escanear QR</strong>
+                  <span>La cámara es opcional. El ingreso manual sigue disponible.</span>
+                </div>
+                <span style={scannerStatus === 'active' ? t.badge(t.colors.success, t.colors.successSoft) : t.badge(t.colors.textSecondary, t.colors.border)}>
+                  {scannerStatus === 'requesting'
+                    ? 'Solicitando'
+                    : scannerStatus === 'active'
+                      ? 'Cámara activa'
+                      : scannerStatus === 'detected'
+                        ? 'QR detectado'
+                        : 'Manual disponible'}
+                </span>
+              </div>
+
+              <div style={styles.videoFrame}>
+                <video ref={videoRef} muted playsInline style={styles.video} />
+                {scannerStatus !== 'active' && scannerStatus !== 'requesting' && (
+                  <div style={styles.videoFallback}>
+                    <span>{scannerStatus === 'detected' ? 'QR detectado' : 'Lector QR'}</span>
+                  </div>
+                )}
+              </div>
+
+              <span style={styles.scannerText}>{scannerMessage}</span>
+
+              <div style={styles.actions}>
+                {scannerStatus === 'active' || scannerStatus === 'requesting' ? (
+                  <button type="button" onClick={() => {
+                    stopScanner('idle');
+                    setScannerMessage('Escaneo detenido. Podés iniciar la cámara otra vez o usar ingreso manual.');
+                  }} style={t.secondaryBtn}>
+                    Detener cámara
+                  </button>
+                ) : (
+                  <button type="button" onClick={startScanner} disabled={loading} style={t.primaryBtn}>
+                    Iniciar cámara
+                  </button>
+                )}
+                <button type="button" onClick={() => setMode('manual')} style={t.secondaryBtn}>
+                  Usar ingreso manual
+                </button>
+              </div>
             </section>
           )}
 
@@ -193,7 +366,12 @@ const styles = {
   modeBtnActive: { border: 'none', background: t.colors.primarySoft, color: t.colors.primary, padding: '0.5rem', cursor: 'pointer', fontWeight: 700 },
   modeSection: { display: 'grid', gap: '0.6rem' },
   initialState: { ...t.card, padding: '0.7rem', display: 'grid', gap: '0.2rem', fontSize: '0.8rem', color: t.colors.textSecondary },
-  scanPlaceholder: { ...t.card, padding: '0.9rem', display: 'grid', gap: '0.45rem', color: t.colors.textSecondary, fontSize: '0.82rem' },
+  scanBox: { ...t.card, padding: '0.85rem', display: 'grid', gap: '0.65rem', color: t.colors.textSecondary, fontSize: '0.82rem' },
+  scanHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.65rem', flexWrap: 'wrap' },
+  videoFrame: { position: 'relative', width: '100%', aspectRatio: '4 / 3', borderRadius: t.radius.input, overflow: 'hidden', background: t.colors.bg, border: `1px solid ${t.colors.border}` },
+  video: { width: '100%', height: '100%', objectFit: 'cover', display: 'block', background: t.colors.bg },
+  videoFallback: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: t.colors.textSecondary, fontWeight: 700 },
+  scannerText: { display: 'block', fontSize: '0.82rem', color: t.colors.textSecondary },
   loadingBox: { border: `1px solid ${t.colors.border}`, borderRadius: t.radius.input, padding: '0.65rem', fontSize: '0.82rem', color: t.colors.textSecondary, background: t.colors.bg },
   summary: { ...t.card, padding: '0.8rem', display: 'grid', gap: '0.35rem' },
   summaryHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' },
