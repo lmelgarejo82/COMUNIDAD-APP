@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import t from '../../theme';
 import UnitSearchSelect from './UnitSearchSelect';
 
@@ -16,6 +16,7 @@ const initialForm = {
 
 export default function CheckInPanel({ open, onClose, onSubmit, saving }) {
   const [form, setForm] = useState(initialForm);
+  const formRef = useRef(null);
   if (!open) return null;
 
   const update = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
@@ -32,10 +33,15 @@ export default function CheckInPanel({ open, onClose, onSubmit, saving }) {
   const handleUnitClear = () => {
     setForm(prev => ({ ...prev, unit_id: null, destination_label: '' }));
   };
-  const submit = async (event) => {
-    event.preventDefault();
+  const submit = async () => {
+    if (!formRef.current?.reportValidity()) return;
     await onSubmit(form);
     setForm(initialForm);
+  };
+  const preventAccidentalSubmit = (event) => {
+    if (event.key === 'Enter' && event.target.tagName !== 'TEXTAREA') {
+      event.preventDefault();
+    }
   };
 
   return (
@@ -49,7 +55,7 @@ export default function CheckInPanel({ open, onClose, onSubmit, saving }) {
           <button type="button" onClick={onClose} style={styles.closeBtn}>×</button>
         </div>
 
-        <form onSubmit={submit} style={{ display: 'grid', gap: '0.65rem' }}>
+        <form ref={formRef} onSubmit={(event) => event.preventDefault()} onKeyDown={preventAccidentalSubmit} style={{ display: 'grid', gap: '0.65rem' }}>
           <label>
             <span style={t.font.label}>Nombre del visitante</span>
             <input value={form.visitor_name} onChange={(e) => update('visitor_name', e.target.value)} required style={t.input} />
@@ -97,7 +103,7 @@ export default function CheckInPanel({ open, onClose, onSubmit, saving }) {
           </label>
           <div style={styles.actions}>
             <button type="button" onClick={onClose} style={t.secondaryBtn}>Cancelar</button>
-            <button type="submit" disabled={saving} style={{ ...t.primaryBtn, opacity: saving ? 0.7 : 1 }}>
+            <button type="button" onClick={submit} disabled={saving} style={{ ...t.primaryBtn, opacity: saving ? 0.7 : 1 }}>
               {saving ? 'Registrando...' : 'Confirmar ingreso'}
             </button>
           </div>

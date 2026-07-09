@@ -5,10 +5,12 @@ import { hierarchyService } from '../../services/hierarchy';
 export default function UnitSearchSelect({ value, selectedUnitId, onManualChange, onSelect, onClear }) {
   const [query, setQuery] = useState(value || '');
   const [options, setOptions] = useState([]);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
   const requestSeq = useRef(0);
+  const optionRefs = useRef([]);
 
   useEffect(() => {
     setQuery(value || '');
@@ -23,11 +25,14 @@ export default function UnitSearchSelect({ value, selectedUnitId, onManualChange
       try {
         const { data } = await hierarchyService.searchUnits({ q: query, limit: 12 });
         if (requestSeq.current !== seq) return;
-        setOptions(data.data || []);
+        const nextOptions = data.data || [];
+        setOptions(nextOptions);
+        setHighlightedIndex(nextOptions.length > 0 ? 0 : -1);
       } catch {
         if (requestSeq.current !== seq) return;
         setError('No pudimos buscar unidades.');
         setOptions([]);
+        setHighlightedIndex(-1);
       } finally {
         if (requestSeq.current === seq) setLoading(false);
       }
@@ -39,12 +44,14 @@ export default function UnitSearchSelect({ value, selectedUnitId, onManualChange
   function handleInput(value) {
     setQuery(value);
     setOpen(true);
+    setHighlightedIndex(-1);
     onManualChange(value);
   }
 
   function handleSelect(unit) {
     setOpen(false);
     setQuery(unit.unit_label);
+    setHighlightedIndex(-1);
     onSelect(unit);
   }
 
@@ -52,8 +59,47 @@ export default function UnitSearchSelect({ value, selectedUnitId, onManualChange
     setQuery('');
     setOptions([]);
     setOpen(false);
+    setHighlightedIndex(-1);
     onClear();
   }
+
+  function handleKeyDown(event) {
+    if (event.key === 'Tab') return;
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setOpen(false);
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setOpen(true);
+      if (options.length === 0) return;
+      setHighlightedIndex(prev => Math.min(prev + 1, options.length - 1));
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setOpen(true);
+      if (options.length === 0) return;
+      setHighlightedIndex(prev => Math.max(prev <= 0 ? 0 : prev - 1, 0));
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (open && highlightedIndex >= 0 && options[highlightedIndex]) {
+        handleSelect(options[highlightedIndex]);
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!open || highlightedIndex < 0) return;
+    optionRefs.current[highlightedIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedIndex, open]);
 
   return (
     <div style={{ display: 'block', position: 'relative' }}>
@@ -63,6 +109,7 @@ export default function UnitSearchSelect({ value, selectedUnitId, onManualChange
           value={query}
           onFocus={() => setOpen(true)}
           onChange={(e) => handleInput(e.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Buscar unidad o escribir destino manual"
           style={{ ...t.input, marginBottom: 0 }}
         />
@@ -73,17 +120,29 @@ export default function UnitSearchSelect({ value, selectedUnitId, onManualChange
         )}
       </div>
 
-      <div style={{ fontSize: '0.74rem', color: selectedUnitId ? t.colors.success : t.colors.textSecondary, marginTop: '0.28rem' }}>
-        {selectedUnitId ? 'Unidad del sistema seleccionada.' : 'Sin unidad seleccionada: se usará como destino manual.'}
+      <div style={{ fontSize: '0.74rem', color: selectedUnitId ? t.colors.success : t.colors.textSecondary, marginTop: '0.28rem', fontWeight: selectedUnitId ? 700 : 500 }}>
+        {selectedUnitId ? 'Unidad seleccionada del sistema' : 'Destino manual, sin unidad del sistema seleccionada'}
       </div>
 
       {open && (
         <div style={styles.dropdown}>
           {loading && <div style={styles.state}>Buscando unidades...</div>}
           {!loading && error && <div style={{ ...styles.state, color: t.colors.danger }}>{error}</div>}
-          {!loading && !error && options.length === 0 && <div style={styles.state}>No se encontraron unidades.</div>}
-          {!loading && !error && options.map(unit => (
-            <button key={unit.unit_id} type="button" onClick={() => handleSelect(unit)} style={styles.option}>
+          {!loading && !error && options.length === 0 && <div style={styles.state}>No se encontraron unidades. Podés usar destino manual si corresponde.</div>}
+          {!loading && !error && options.map((unit, index) => (
+            <button
+              key={unit.unit_id}
+              ref={(el) => { optionRefs.current[index] = el; }}
+              type="button"
+              onClick={() => handleSelect(unit)}
+              onMouseEnter={() => setHighlightedIndex(index)}
+              style={{
+                ...styles.option,
+                background: index === highlightedIndex ? t.colors.primarySoft : t.colors.white,
+                outline: index === highlightedIndex ? `2px solid ${t.colors.secondary}` : 'none',
+                outlineOffset: '-2px',
+              }}
+            >
               <strong style={{ color: t.colors.textPrimary }}>{unit.unit_label}</strong>
               <span style={{ color: t.colors.textSecondary, fontSize: '0.76rem' }}>{unit.display_path}</span>
               <span style={{ color: t.colors.textDisabled, fontSize: '0.72rem' }}>{unit.complex_name}</span>
