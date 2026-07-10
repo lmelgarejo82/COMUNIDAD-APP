@@ -2,15 +2,32 @@ const { Ticket } = require('../models/Ticket');
 const { Notification } = require('../models/Notification');
 const { invalidatePattern } = require('../cache');
 
+const VALID_CATEGORIES = new Set(['maintenance', 'cleaning', 'security', 'coexistence', 'administration', 'amenities', 'other']);
+const VALID_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
+const VALID_STATUSES = new Set(['sent', 'in_review', 'in_progress', 'resolved', 'closed', 'cancelled']);
+
 exports.create = async (req, res) => {
   try {
     const user = await require('../models/User').User.findById(req.user.id);
     if (user?.community_id !== req.communityId || !user?.unit_number) return res.status(404).json({ error: 'Usuario sin comunidad o unidad asignada' });
-    const { title, description } = req.body;
-    if (!title) return res.status(400).json({ error: 'title es requerido' });
+    const { title, description, category = 'other', priority = 'medium', location_label } = req.body;
+    if (!title?.trim()) return res.status(400).json({ error: 'title es requerido' });
+    if (!description?.trim()) return res.status(400).json({ error: 'description es requerido' });
+    if (!VALID_CATEGORIES.has(category)) return res.status(400).json({ error: 'category inválida' });
+    if (!VALID_PRIORITIES.has(priority)) return res.status(400).json({ error: 'priority inválida' });
     let file_url = null;
     if (req.file) file_url = `/uploads/${req.file.filename}`;
-    const ticket = await Ticket.create({ community_id: req.communityId, user_id: req.user.id, unit_number: user.unit_number, title, description: description || null, file_url });
+    const ticket = await Ticket.create({
+      community_id: req.communityId,
+      user_id: req.user.id,
+      unit_number: user.unit_number,
+      title: title.trim(),
+      description: description.trim(),
+      category,
+      priority,
+      location_label: location_label?.trim() || null,
+      file_url,
+    });
     const admins = await require('../db').pool.query("SELECT id FROM users WHERE community_id = $1 AND role = 'admin'", [req.communityId]);
     for (const admin of admins.rows) {
       await Notification.create({ user_id: admin.id, type: 'ticket_new', title: 'Nuevo ticket', message: `${user.unit_number}: ${title}`, reference_id: ticket.id });
@@ -26,8 +43,8 @@ exports.create = async (req, res) => {
 exports.listAll = async (req, res) => {
   try {
     if (!req.communityId) return res.status(404).json({ error: 'Comunidad no especificada' });
-    const { page, limit, status } = req.query;
-    const result = await Ticket.findByCommunity(req.communityId, { page, limit, status });
+    const { page, limit, status, category, priority } = req.query;
+    const result = await Ticket.findByCommunity(req.communityId, { page, limit, status, category, priority });
     res.json(result);
   } catch (err) {
     console.error('Error en listAll tickets:', err);
@@ -37,8 +54,8 @@ exports.listAll = async (req, res) => {
 
 exports.listMy = async (req, res) => {
   try {
-    const { page, limit } = req.query;
-    const result = await Ticket.findByUser(req.user.id, req.communityId, { page, limit });
+    const { page, limit, status, category, priority } = req.query;
+    const result = await Ticket.findByUser(req.user.id, req.communityId, { page, limit, status, category, priority });
     res.json(result);
   } catch (err) {
     console.error('Error en listMy tickets:', err);
@@ -51,7 +68,7 @@ exports.updateStatus = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    if (!['sent', 'in_progress', 'resolved'].includes(status)) {
+    if (!VALID_STATUSES.has(status)) {
       return res.status(400).json({ error: 'Estado inválido' });
     }
 

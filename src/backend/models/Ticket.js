@@ -2,12 +2,23 @@ const { pool } = require('../db');
 const { Hierarchy } = require('./Hierarchy');
 
 const Ticket = {
-  async create({ community_id, user_id, unit_number, title, description, file_url }) {
+  async create({ community_id, user_id, unit_number, title, description, category, priority, location_label, file_url }) {
     const unitId = await Hierarchy.resolveUnitId(community_id, unit_number);
     const { rows } = await pool.query(
-      `INSERT INTO tickets (community_id, user_id, unit_number, unit_id, title, description, file_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [community_id, user_id, unit_number, unitId, title, description || null, file_url || null]
+      `INSERT INTO tickets (community_id, user_id, unit_number, unit_id, title, description, category, priority, location_label, file_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [
+        community_id,
+        user_id,
+        unit_number,
+        unitId,
+        title,
+        description || null,
+        category || 'other',
+        priority || 'medium',
+        location_label || null,
+        file_url || null,
+      ]
     );
     return rows[0];
   },
@@ -20,7 +31,7 @@ const Ticket = {
     return rows[0] || null;
   },
 
-  async findByCommunity(communityId, { status, page = 1, limit = 10 } = {}) {
+  async findByCommunity(communityId, { status, category, priority, page = 1, limit = 10 } = {}) {
     const offset = (parseInt(page) - 1) * parseInt(limit);
     let whereClause = 'WHERE t.community_id = $1 AND t.deleted_at IS NULL';
     const params = [communityId];
@@ -29,6 +40,14 @@ const Ticket = {
     if (status) {
       whereClause += ` AND t.status = $${paramIdx++}`;
       params.push(status);
+    }
+    if (category) {
+      whereClause += ` AND t.category = $${paramIdx++}`;
+      params.push(category);
+    }
+    if (priority) {
+      whereClause += ` AND t.priority = $${paramIdx++}`;
+      params.push(priority);
     }
 
     const { rows: countRows } = await pool.query(
@@ -46,17 +65,33 @@ const Ticket = {
     return { data: rows, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) || 1 };
   },
 
-  async findByUser(userId, communityId, { page = 1, limit = 10 } = {}) {
+  async findByUser(userId, communityId, { status, category, priority, page = 1, limit = 10 } = {}) {
     const offset = (parseInt(page) - 1) * parseInt(limit);
+    const conditions = ['user_id = $1', 'community_id = $2', 'deleted_at IS NULL'];
+    const params = [userId, communityId];
+    let paramIdx = 3;
+    if (status) {
+      conditions.push(`status = $${paramIdx++}`);
+      params.push(status);
+    }
+    if (category) {
+      conditions.push(`category = $${paramIdx++}`);
+      params.push(category);
+    }
+    if (priority) {
+      conditions.push(`priority = $${paramIdx++}`);
+      params.push(priority);
+    }
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
     const { rows: countRows } = await pool.query(
-      'SELECT COUNT(*) FROM tickets WHERE user_id = $1 AND community_id = $2 AND deleted_at IS NULL',
-      [userId, communityId]
+      `SELECT COUNT(*) FROM tickets ${whereClause}`,
+      params
     );
     const total = parseInt(countRows[0].count);
     const { rows } = await pool.query(
-      `SELECT * FROM tickets WHERE user_id = $1 AND community_id = $2 AND deleted_at IS NULL
-       ORDER BY updated_at DESC LIMIT $3 OFFSET $4`,
-      [userId, communityId, limit, offset]
+      `SELECT * FROM tickets ${whereClause}
+       ORDER BY updated_at DESC LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
+      [...params, limit, offset]
     );
     return { data: rows, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) || 1 };
   },

@@ -1,230 +1,452 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { ticketService } from '../services/comunicacion';
 import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/Spinner';
 import { getErrorMessage } from '../services/errors';
+import t from '../theme';
 
-const STATUS_OPTIONS = [
-  { value: 'sent', label: 'Pendiente', color: '#dc3545', bg: '#f8d7da' },
-  { value: 'in_progress', label: 'En proceso', color: '#fd7e14', bg: '#fff3cd' },
-  { value: 'resolved', label: 'Resuelto', color: '#198754', bg: '#d1e7dd' },
+const CATEGORY_OPTIONS = [
+  { value: 'maintenance', label: 'Mantenimiento', hint: 'Agua, ascensor, portón, luces o reparaciones.' },
+  { value: 'cleaning', label: 'Limpieza', hint: 'Pasillos, residuos, áreas comunes.' },
+  { value: 'security', label: 'Seguridad', hint: 'Accesos, cerraduras, situaciones de riesgo.' },
+  { value: 'coexistence', label: 'Convivencia', hint: 'Ruido, mascotas, molestias entre vecinos.' },
+  { value: 'administration', label: 'Expensas/Administración', hint: 'Consultas administrativas sin tocar pagos.' },
+  { value: 'amenities', label: 'Amenities', hint: 'Reservas o problemas en espacios comunes.' },
+  { value: 'other', label: 'Otro', hint: 'Cualquier situación no contemplada.' },
 ];
 
-function statusInfo(val) {
-  return STATUS_OPTIONS.find(s => s.value === val) || STATUS_OPTIONS[0];
+const PRIORITY_OPTIONS = [
+  { value: 'low', label: 'Baja', color: t.colors.textSecondary, bg: t.colors.border },
+  { value: 'medium', label: 'Media', color: t.colors.info, bg: t.colors.primarySoft },
+  { value: 'high', label: 'Alta', color: t.colors.accent, bg: t.colors.accentSoft },
+  { value: 'urgent', label: 'Urgente', color: t.colors.danger, bg: t.colors.dangerSoft },
+];
+
+const STATUS_OPTIONS = [
+  { value: 'sent', label: 'Abierto', color: t.colors.info, bg: t.colors.primarySoft },
+  { value: 'in_review', label: 'En revisión', color: t.colors.accent, bg: t.colors.accentSoft },
+  { value: 'in_progress', label: 'En proceso', color: t.colors.accentHover, bg: t.colors.accentSoft },
+  { value: 'resolved', label: 'Resuelto', color: t.colors.success, bg: t.colors.successSoft },
+  { value: 'closed', label: 'Cerrado', color: t.colors.textSecondary, bg: t.colors.border },
+  { value: 'cancelled', label: 'Cancelado', color: t.colors.danger, bg: t.colors.dangerSoft },
+];
+
+const EXAMPLES = [
+  'Pérdida de agua en pasillo del piso 2',
+  'Ascensor no funciona desde la mañana',
+  'Portón eléctrico queda abierto',
+  'Luces quemadas en cochera',
+  'Ruido molesto fuera de horario',
+  'Limpieza pendiente en hall de entrada',
+];
+
+const initialForm = {
+  category: 'maintenance',
+  priority: 'medium',
+  title: '',
+  description: '',
+  location_label: '',
+};
+
+const initialFilters = { status: '', category: '', priority: '' };
+
+function optionLabel(options, value) {
+  return options.find(opt => opt.value === value)?.label || value || '-';
+}
+
+function badgeFor(options, value) {
+  const opt = options.find(item => item.value === value) || options[0];
+  return t.badge(opt.color, opt.bg);
+}
+
+function formatDate(value) {
+  if (!value) return '-';
+  return new Date(value).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
 export default function Tickets() {
   const { user } = useAuth();
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState(null);
   const [replyMsg, setReplyMsg] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '' });
+  const [form, setForm] = useState(initialForm);
+  const [filters, setFilters] = useState(initialFilters);
   const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const isAdmin = user?.role === 'admin';
 
-  useEffect(() => { load(); }, [page]);
+  useEffect(() => { load(); }, [page, filters.status, filters.category, filters.priority]);
 
   async function load() {
     setLoading(true);
+    setError('');
     try {
-      const { data } = isAdmin ? await ticketService.listAll(page) : await ticketService.listMy(page);
+      const activeFilters = Object.fromEntries(Object.entries(filters).filter(([, value]) => value));
+      const { data } = isAdmin
+        ? await ticketService.listAll(page, activeFilters)
+        : await ticketService.listMy(page, activeFilters);
       setTickets(data.data || []);
       setTotalPages(data.totalPages || 1);
     } catch (err) {
-      setMsg(getErrorMessage(err, 'Error al cargar tickets'));
+      setError(getErrorMessage(err, 'Error al cargar tickets'));
     } finally {
       setLoading(false);
     }
   }
 
+  function updateForm(field, value) {
+    setForm(prev => ({ ...prev, [field]: value }));
+  }
+
   async function handleStatusChange(ticketId, status) {
-    await ticketService.updateStatus(ticketId, status);
-    load();
-    const t = tickets.find(t => t.id === ticketId);
-    if (selected?.id === ticketId) {
-      const { data } = isAdmin ? await ticketService.listAll() : await ticketService.listMy();
-      const updated = data.find(t => t.id === ticketId);
-      setSelected(updated || null);
+    setSaving(true);
+    setMsg('');
+    setError('');
+    try {
+      const { data } = await ticketService.updateStatus(ticketId, status);
+      setMsg('Estado actualizado');
+      setSelected(prev => prev?.id === ticketId ? { ...prev, ...data } : prev);
+      await load();
+    } catch (err) {
+      setError(getErrorMessage(err, 'Error al actualizar estado'));
+    } finally {
+      setSaving(false);
     }
   }
 
   async function handleReply(e) {
     e.preventDefault();
     if (!replyMsg.trim()) return;
+    setSaving(true);
     setMsg('');
+    setError('');
     try {
-      await ticketService.addReply(selected.id, replyMsg);
+      const { data } = await ticketService.addReply(selected.id, replyMsg.trim());
       setReplyMsg('');
-      const { data } = isAdmin ? await ticketService.listAll() : await ticketService.listMy();
-      const updated = data.find(t => t.id === selected.id);
-      setSelected(updated || null);
-      load();
+      setSelected(prev => prev ? { ...prev, replies: [...(prev.replies || []), data] } : prev);
+      setMsg('Respuesta agregada');
+      await load();
     } catch (err) {
-      setMsg(getErrorMessage(err, 'Error al responder'));
+      setError(getErrorMessage(err, 'Error al responder'));
+    } finally {
+      setSaving(false);
     }
   }
 
   async function handleCreate(e) {
     e.preventDefault();
     setMsg('');
+    setError('');
+    if (!form.title.trim() || !form.description.trim()) {
+      setError('Completá título y descripción para enviar el ticket.');
+      return;
+    }
+    setSaving(true);
     try {
-      await ticketService.create(form);
-      setForm({ title: '', description: '' });
+      await ticketService.create({
+        ...form,
+        title: form.title.trim(),
+        description: form.description.trim(),
+        location_label: form.location_label.trim() || null,
+      });
+      setForm(initialForm);
       setShowForm(false);
-      load();
+      setMsg('Ticket creado correctamente');
+      setPage(1);
+      await load();
     } catch (err) {
-      setMsg(getErrorMessage(err, 'Error al crear'));
+      setError(getErrorMessage(err, 'Error al crear ticket'));
+    } finally {
+      setSaving(false);
     }
   }
 
-  function openTicket(t) {
-    setSelected(t);
+  function openTicket(ticket) {
+    setSelected(ticket);
     setReplyMsg('');
     setMsg('');
+    setError('');
   }
 
-  if (loading) return <div style={s.container}><Spinner /></div>;
-
   return (
-    <div style={s.container}>
-      <h2 style={s.heading}>Tickets</h2>
+    <div style={t.page}>
+      <div style={t.headerBar}>
+        <div>
+          <h1 style={{ ...t.font.title, margin: 0 }}>Tickets</h1>
+          <span style={t.font.subtitle}>
+            {isAdmin ? 'Bandeja de reclamos y solicitudes de la comunidad.' : 'Contanos qué está pasando para que administración pueda ayudarte.'}
+          </span>
+        </div>
+        {!isAdmin && (
+          <button type="button" style={showForm ? t.secondaryBtn : t.primaryBtn} onClick={() => setShowForm(prev => !prev)}>
+            {showForm ? 'Cancelar' : 'Nuevo ticket'}
+          </button>
+        )}
+      </div>
 
-      {!isAdmin && (
-        <button style={s.newBtn} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancelar' : '+ Nuevo ticket'}
-        </button>
+      {(msg || error) && (
+        <div style={{ marginBottom: '0.75rem', ...(error ? t.toast('error') : t.toast('success')) }}>
+          {error || msg}
+        </div>
       )}
 
-      {showForm && (
-        <form onSubmit={handleCreate} style={s.form}>
-          {msg && <p style={s.msg}>{msg}</p>}
-          <input placeholder="Título" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required style={s.input} />
-          <textarea placeholder="Descripción" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} style={{ ...s.input, resize: 'vertical' }} />
-          <button type="submit" style={s.submitBtn}>Crear ticket</button>
-        </form>
+      {!isAdmin && showForm && (
+        <section style={styles.createLayout}>
+          <form onSubmit={handleCreate} style={styles.formCard}>
+            <div>
+              <h2 style={styles.sectionTitle}>Nuevo ticket</h2>
+              <span style={t.font.subtitle}>¿Qué necesitás reportar?</span>
+            </div>
+
+            <div style={styles.categoryGrid}>
+              {CATEGORY_OPTIONS.map(category => (
+                <button
+                  key={category.value}
+                  type="button"
+                  onClick={() => updateForm('category', category.value)}
+                  style={form.category === category.value ? styles.categoryActive : styles.categoryCard}
+                >
+                  <strong>{category.label}</strong>
+                  <span>{category.hint}</span>
+                </button>
+              ))}
+            </div>
+
+            <div style={styles.twoCols}>
+              <label>
+                <span style={t.font.label}>Prioridad</span>
+                <select value={form.priority} onChange={(e) => updateForm('priority', e.target.value)} style={t.input}>
+                  {PRIORITY_OPTIONS.map(priority => <option key={priority.value} value={priority.value}>{priority.label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span style={t.font.label}>Ubicación o área afectada</span>
+                <input
+                  value={form.location_label}
+                  onChange={(e) => updateForm('location_label', e.target.value)}
+                  placeholder="Ej: pasillo piso 2, cochera, SUM"
+                  style={t.input}
+                />
+              </label>
+            </div>
+
+            <label>
+              <span style={t.font.label}>Título</span>
+              <input
+                value={form.title}
+                onChange={(e) => updateForm('title', e.target.value)}
+                placeholder="Ej: pérdida de agua en pasillo del piso 2"
+                required
+                style={t.input}
+              />
+            </label>
+
+            <label>
+              <span style={t.font.label}>Descripción</span>
+              <textarea
+                value={form.description}
+                onChange={(e) => updateForm('description', e.target.value)}
+                placeholder="Describí el problema con el mayor detalle posible."
+                required
+                rows={5}
+                style={{ ...t.input, resize: 'vertical' }}
+              />
+            </label>
+
+            <div style={styles.formActions}>
+              <button type="button" onClick={() => setForm(initialForm)} style={t.secondaryBtn}>Limpiar</button>
+              <button type="submit" disabled={saving} style={{ ...t.primaryBtn, opacity: saving ? 0.7 : 1 }}>
+                {saving ? 'Enviando...' : 'Enviar ticket'}
+              </button>
+            </div>
+          </form>
+
+          <aside style={styles.helpBox}>
+            <h3 style={styles.helpTitle}>Ejemplos frecuentes</h3>
+            {EXAMPLES.map(example => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => updateForm('title', example)}
+                style={styles.exampleBtn}
+              >
+                {example}
+              </button>
+            ))}
+          </aside>
+        </section>
       )}
 
-      {tickets.length === 0 ? (
-        <p style={s.empty}>No hay tickets.</p>
+      <section style={styles.toolbar}>
+        <div>
+          <h2 style={styles.sectionTitle}>{isAdmin ? 'Bandeja de tickets' : 'Mis tickets'}</h2>
+          <span style={t.font.subtitle}>{tickets.length} registros visibles</span>
+        </div>
+        <div style={styles.filters}>
+          <select value={filters.status} onChange={(e) => { setPage(1); setFilters(prev => ({ ...prev, status: e.target.value })); }} style={t.input}>
+            <option value="">Todos los estados</option>
+            {STATUS_OPTIONS.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
+          </select>
+          <select value={filters.category} onChange={(e) => { setPage(1); setFilters(prev => ({ ...prev, category: e.target.value })); }} style={t.input}>
+            <option value="">Todas las categorías</option>
+            {CATEGORY_OPTIONS.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}
+          </select>
+          <select value={filters.priority} onChange={(e) => { setPage(1); setFilters(prev => ({ ...prev, priority: e.target.value })); }} style={t.input}>
+            <option value="">Todas las prioridades</option>
+            {PRIORITY_OPTIONS.map(priority => <option key={priority.value} value={priority.value}>{priority.label}</option>)}
+          </select>
+          <button type="button" onClick={() => { setPage(1); setFilters(initialFilters); }} style={t.secondaryBtn}>Limpiar</button>
+        </div>
+      </section>
+
+      {loading ? (
+        <div style={styles.loading}><Spinner /></div>
+      ) : tickets.length === 0 ? (
+        <div style={styles.emptyState}>
+          <strong>No hay tickets para mostrar.</strong>
+          <span>{isAdmin ? 'Cuando los residentes reporten problemas, aparecerán acá.' : 'Todavía no registraste reclamos o solicitudes.'}</span>
+        </div>
       ) : (
-        tickets.map((t) => {
-          const st = statusInfo(t.status);
-          return (
-            <div key={t.id} style={s.card} onClick={() => openTicket(t)}>
-              <div style={s.cardHeader}>
+        <div style={styles.ticketList}>
+          {tickets.map(ticket => (
+            <button key={ticket.id} type="button" style={styles.ticketCard} onClick={() => openTicket(ticket)}>
+              <div style={styles.ticketHeader}>
                 <div>
-                  <strong>{t.title}</strong>
-                  <span style={{ marginLeft: '0.5rem', color: '#6c757d', fontSize: '0.8rem' }}>
-                    {t.unit_number} {t.user_email && `· ${t.user_email}`}
+                  <strong style={styles.ticketTitle}>{ticket.title}</strong>
+                  <span style={styles.meta}>
+                    {ticket.unit_number || 'Sin unidad'}
+                    {ticket.location_label ? ` · ${ticket.location_label}` : ''}
+                    {isAdmin && ticket.user_email ? ` · ${ticket.user_email}` : ''}
                   </span>
                 </div>
-                <span style={{ ...s.badge, background: st.bg, color: st.color }}>{st.label}</span>
+                <span style={badgeFor(STATUS_OPTIONS, ticket.status)}>{optionLabel(STATUS_OPTIONS, ticket.status)}</span>
               </div>
-            </div>
-          );
-        }        )
+              <p style={styles.description}>{ticket.description || 'Sin descripción'}</p>
+              <div style={styles.cardFooter}>
+                <span style={badgeFor(CATEGORY_OPTIONS, ticket.category)}>{optionLabel(CATEGORY_OPTIONS, ticket.category)}</span>
+                <span style={badgeFor(PRIORITY_OPTIONS, ticket.priority)}>{optionLabel(PRIORITY_OPTIONS, ticket.priority)}</span>
+                <span style={styles.meta}>Actualizado: {formatDate(ticket.updated_at)}</span>
+              </div>
+            </button>
+          ))}
+        </div>
       )}
 
       {totalPages > 1 && (
-        <div style={s.pagination}>
-          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} style={s.pageBtn}>Anterior</button>
-          <span style={s.pageInfo}>Pág. {page} de {totalPages}</span>
-          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} style={s.pageBtn}>Siguiente</button>
+        <div style={styles.pagination}>
+          <button type="button" onClick={() => setPage(prev => Math.max(1, prev - 1))} disabled={page <= 1} style={t.secondaryBtn}>Anterior</button>
+          <span style={styles.meta}>Pág. {page} de {totalPages}</span>
+          <button type="button" onClick={() => setPage(prev => Math.min(totalPages, prev + 1))} disabled={page >= totalPages} style={t.secondaryBtn}>Siguiente</button>
         </div>
       )}
 
       {selected && (
-        <div style={s.overlay} onClick={() => setSelected(null)}>
-          <div style={s.modal} onClick={(e) => e.stopPropagation()}>
-            <h3>{selected.title}</h3>
-            <p style={s.meta}>
-              {selected.unit_number} · {new Date(selected.created_at).toLocaleDateString('es-AR')}
-            </p>
-            {selected.description && <p style={s.desc}>{selected.description}</p>}
-
-            {isAdmin && (
-              <div style={s.statusRow}>
-                {STATUS_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    style={{
-                      ...s.statusBtn,
-                      background: selected.status === opt.value ? opt.color : '#e9ecef',
-                      color: selected.status === opt.value ? '#fff' : '#495057',
-                    }}
-                    onClick={() => handleStatusChange(selected.id, opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div style={s.replies}>
-              <h4 style={s.repliesTitle}>Respuestas</h4>
-              {selected.replies?.length === 0 && <p style={s.noReplies}>Sin respuestas aún.</p>}
-              {selected.replies?.map((r) => (
-                <div key={r.id} style={{ ...s.reply, background: r.is_admin ? '#f0f7ff' : '#f8f9fa' }}>
-                  <p style={s.replyText}>{r.message}</p>
-                  <small style={s.replyMeta}>
-                    {r.is_admin ? 'Administración' : 'Vos'} · {new Date(r.created_at).toLocaleString('es-AR')}
-                  </small>
+        <div style={styles.overlay} onClick={() => setSelected(null)}>
+          <aside style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <div>
+                <h2 style={{ ...t.font.title, margin: 0 }}>{selected.title}</h2>
+                <div style={styles.chipRow}>
+                  <span style={badgeFor(STATUS_OPTIONS, selected.status)}>{optionLabel(STATUS_OPTIONS, selected.status)}</span>
+                  <span style={badgeFor(PRIORITY_OPTIONS, selected.priority)}>{optionLabel(PRIORITY_OPTIONS, selected.priority)}</span>
                 </div>
-              ))}
+              </div>
+              <button type="button" onClick={() => setSelected(null)} style={styles.closeBtn}>×</button>
             </div>
 
-            <form onSubmit={handleReply} style={s.replyForm}>
-              <textarea
-                placeholder="Escribí una respuesta..."
-                value={replyMsg}
-                onChange={(e) => setReplyMsg(e.target.value)}
-                rows={2}
-                style={{ ...s.input, resize: 'vertical' }}
-              />
-              <button type="submit" style={s.replyBtn}>Responder</button>
-            </form>
+            <div style={styles.detailGrid}>
+              <span><strong>Categoría</strong>{optionLabel(CATEGORY_OPTIONS, selected.category)}</span>
+              <span><strong>Unidad</strong>{selected.unit_number || '-'}</span>
+              <span><strong>Ubicación</strong>{selected.location_label || '-'}</span>
+              <span><strong>Creado</strong>{formatDate(selected.created_at)}</span>
+            </div>
+            <p style={styles.detailDescription}>{selected.description || 'Sin descripción'}</p>
 
-            <button style={s.closeBtn} onClick={() => setSelected(null)}>Cerrar</button>
-          </div>
+            {isAdmin && (
+              <section style={styles.block}>
+                <h3 style={styles.helpTitle}>Gestión</h3>
+                <div style={styles.statusActions}>
+                  {STATUS_OPTIONS.map(status => (
+                    <button
+                      key={status.value}
+                      type="button"
+                      onClick={() => handleStatusChange(selected.id, status.value)}
+                      disabled={saving}
+                      style={selected.status === status.value ? t.primaryBtn : t.secondaryBtn}
+                    >
+                      {status.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section style={styles.block}>
+              <h3 style={styles.helpTitle}>Respuestas</h3>
+              {!(selected.replies || []).length && <span style={styles.meta}>Sin respuestas aún.</span>}
+              {(selected.replies || []).map(reply => (
+                <div key={reply.id} style={{ ...styles.reply, background: reply.is_admin ? t.colors.primarySoft : t.colors.bg }}>
+                  <p style={styles.replyText}>{reply.message}</p>
+                  <span style={styles.meta}>{reply.is_admin ? 'Administración' : 'Residente'} · {formatDate(reply.created_at)}</span>
+                </div>
+              ))}
+              <form onSubmit={handleReply} style={styles.replyForm}>
+                <textarea
+                  placeholder="Escribí una respuesta..."
+                  value={replyMsg}
+                  onChange={(e) => setReplyMsg(e.target.value)}
+                  rows={3}
+                  style={{ ...t.input, resize: 'vertical' }}
+                />
+                <button type="submit" disabled={saving || !replyMsg.trim()} style={t.primaryBtn}>Responder</button>
+              </form>
+            </section>
+          </aside>
         </div>
       )}
     </div>
   );
 }
 
-const s = {
-  container: { padding: '1.5rem', maxWidth: '800px', margin: '0 auto' },
-  heading: { fontSize: '1.5rem', color: '#2c3e50', marginBottom: '1rem' },
-  empty: { color: '#6c757d', textAlign: 'center', padding: '2rem' },
-  newBtn: { padding: '0.6rem 1.25rem', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', marginBottom: '1rem', fontSize: '0.9rem', minHeight: '44px' },
-  form: { background: '#fff', padding: '1rem', borderRadius: '8px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', marginBottom: '1rem' },
-  msg: { background: '#d1e7dd', color: '#0f5132', padding: '0.4rem', borderRadius: '4px', fontSize: '0.85rem', marginBottom: '0.5rem' },
-  input: { width: '100%', padding: '0.6rem', border: '1px solid #ced4da', borderRadius: '4px', fontSize: '0.95rem', marginBottom: '0.5rem', boxSizing: 'border-box' },
-  submitBtn: { padding: '0.6rem 1.25rem', background: '#198754', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', minHeight: '44px' },
-  card: { background: '#fff', padding: '1rem 1.25rem', borderRadius: '8px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', marginBottom: '0.5rem', cursor: 'pointer' },
-  cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  badge: { display: 'inline-block', padding: '0.15rem 0.5rem', borderRadius: '12px', fontSize: '0.7rem', fontWeight: 600 },
-  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 },
-  modal: { background: '#fff', padding: '1.5rem', borderRadius: '8px', maxWidth: '650px', width: '95%', maxHeight: '80vh', overflowY: 'auto' },
-  meta: { fontSize: '0.85rem', color: '#6c757d', marginBottom: '0.75rem' },
-  desc: { fontSize: '0.9rem', color: '#495057', marginBottom: '1rem', whiteSpace: 'pre-wrap' },
-  statusRow: { display: 'flex', gap: '0.5rem', marginBottom: '1rem' },
-  statusBtn: { padding: '0.5rem 0.85rem', border: 'none', borderRadius: '4px', fontSize: '0.85rem', cursor: 'pointer', minHeight: '44px' },
-  replies: { borderTop: '1px solid #dee2e6', paddingTop: '1rem', marginBottom: '1rem' },
-  repliesTitle: { fontSize: '0.95rem', color: '#2c3e50', marginBottom: '0.5rem' },
-  noReplies: { fontSize: '0.85rem', color: '#adb5bd' },
-  reply: { padding: '0.6rem 0.75rem', borderRadius: '6px', marginBottom: '0.4rem' },
-  replyText: { fontSize: '0.9rem', color: '#495057', marginBottom: '0.2rem' },
-  replyMeta: { fontSize: '0.75rem', color: '#adb5bd' },
-  replyForm: { display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' },
-  replyBtn: { padding: '0.5rem 1rem', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem', whiteSpace: 'nowrap', minHeight: '44px' },
-  closeBtn: { marginTop: '1rem', padding: '0.6rem 1.5rem', background: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', minHeight: '44px' },
-  pagination: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '1rem' },
-  pageBtn: { padding: '0.5rem 1rem', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem', minHeight: '44px' },
-  pageInfo: { fontSize: '0.85rem', color: '#6c757d' },
+const styles = {
+  createLayout: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.75rem', alignItems: 'start', marginBottom: '0.75rem' },
+  formCard: { ...t.card, padding: '0.9rem', display: 'grid', gap: '0.65rem' },
+  sectionTitle: { ...t.sectionTitle, margin: 0 },
+  categoryGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.5rem' },
+  categoryCard: { border: `1px solid ${t.colors.border}`, background: t.colors.white, borderRadius: t.radius.input, padding: '0.65rem', display: 'grid', gap: '0.2rem', textAlign: 'left', cursor: 'pointer', color: t.colors.textSecondary },
+  categoryActive: { border: `1px solid ${t.colors.primary}`, background: t.colors.primarySoft, borderRadius: t.radius.input, padding: '0.65rem', display: 'grid', gap: '0.2rem', textAlign: 'left', cursor: 'pointer', color: t.colors.textPrimary },
+  twoCols: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.55rem' },
+  formActions: { display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' },
+  helpBox: { ...t.card, padding: '0.9rem', display: 'grid', gap: '0.45rem' },
+  helpTitle: { margin: 0, fontSize: '0.9rem', fontWeight: 700, color: t.colors.textPrimary },
+  exampleBtn: { border: `1px solid ${t.colors.border}`, background: t.colors.white, borderRadius: t.radius.input, padding: '0.5rem', textAlign: 'left', cursor: 'pointer', color: t.colors.textSecondary, fontSize: '0.8rem' },
+  toolbar: { ...t.card, padding: '0.8rem', display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: '0.75rem' },
+  filters: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: '0.45rem', alignItems: 'start', width: 'min(100%, 760px)' },
+  loading: { ...t.card, padding: '2rem', display: 'grid', placeItems: 'center' },
+  emptyState: { ...t.card, padding: '1rem', display: 'grid', gap: '0.2rem', color: t.colors.textSecondary, textAlign: 'center' },
+  ticketList: { display: 'grid', gap: '0.55rem' },
+  ticketCard: { ...t.card, padding: '0.8rem', display: 'grid', gap: '0.45rem', textAlign: 'left', cursor: 'pointer', borderColor: t.colors.border },
+  ticketHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', flexWrap: 'wrap' },
+  ticketTitle: { color: t.colors.textPrimary, fontSize: '0.95rem' },
+  meta: { display: 'block', fontSize: '0.76rem', color: t.colors.textSecondary },
+  description: { margin: 0, color: t.colors.textSecondary, fontSize: '0.84rem', lineHeight: 1.45 },
+  cardFooter: { display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' },
+  pagination: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', marginTop: '0.9rem', flexWrap: 'wrap' },
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(15,59,94,0.18)', zIndex: 180, display: 'flex', justifyContent: 'flex-end' },
+  modal: { width: 'min(560px, 100%)', height: '100%', background: t.colors.white, padding: '1.2rem', boxShadow: t.shadow.modal, overflowY: 'auto', boxSizing: 'border-box' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.75rem' },
+  closeBtn: { border: 'none', background: 'transparent', fontSize: '1.6rem', cursor: 'pointer', color: t.colors.textSecondary },
+  chipRow: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.4rem' },
+  detailGrid: { ...t.card, padding: '0.75rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.5rem', fontSize: '0.82rem', color: t.colors.textSecondary },
+  detailDescription: { ...t.card, padding: '0.8rem', margin: '0.75rem 0', color: t.colors.textPrimary, fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
+  block: { ...t.card, padding: '0.8rem', marginBottom: '0.75rem', display: 'grid', gap: '0.55rem' },
+  statusActions: { display: 'flex', gap: '0.4rem', flexWrap: 'wrap' },
+  reply: { borderRadius: t.radius.input, padding: '0.6rem', display: 'grid', gap: '0.2rem' },
+  replyText: { margin: 0, color: t.colors.textPrimary, fontSize: '0.84rem' },
+  replyForm: { display: 'grid', gap: '0.45rem' },
 };

@@ -19,11 +19,11 @@ export const announcementService = {
 };
 
 export const ticketService = {
-  listAll(page = 1) {
-    return api.get('/tickets', { params: { page, limit: 10 } });
+  listAll(page = 1, filters = {}) {
+    return api.get('/tickets', { params: { page, limit: 10, ...filters } });
   },
-  listMy(page = 1) {
-    return api.get('/tickets/my', { params: { page, limit: 10 } });
+  listMy(page = 1, filters = {}) {
+    return api.get('/tickets/my', { params: { page, limit: 10, ...filters } });
   },
   create(data) {
     return api.post('/tickets', data);

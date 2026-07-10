@@ -235,6 +235,22 @@ test('resident cannot operate access logs', async () => {
   assert.equal(result.status, 403);
 });
 
+test('access_operator cannot access tickets', async () => {
+  const result = await requestRoute({
+    routeFile: '../routes/tickets',
+    controllerFile: '../controllers/ticketController',
+    controllerExports: {
+      listAll(req, res) { res.json({ ok: true }); },
+      create(req, res) { res.json({ ok: true }); },
+    },
+    role: 'access_operator',
+    method: 'GET',
+    path: '/',
+  });
+
+  assert.equal(result.status, 403);
+});
+
 test('access_operator can search visitor preauthorizations', async () => {
   const result = await requestRoute({
     routeFile: '../routes/accessPreauthorizations',
