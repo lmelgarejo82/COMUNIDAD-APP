@@ -95,8 +95,8 @@ export default function ChatWidget() {
 
 const s = {
   panel: {
-    position: 'fixed', bottom: '80px', right: '20px', width: '360px', maxWidth: 'calc(100vw - 40px)', height: '480px', maxHeight: 'calc(100vh - 120px)',
-    background: '#fff', borderRadius: '12px', boxShadow: '0 8px 30px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', zIndex: 200,
+    position: 'fixed', bottom: '72px', right: '16px', width: '340px', maxWidth: 'calc(100vw - 32px)', height: '460px', maxHeight: 'calc(100vh - 112px)',
+    background: '#fff', borderRadius: '12px', boxShadow: '0 8px 30px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', zIndex: 120,
   },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: '#0d6efd', color: '#fff', borderRadius: '12px 12px 0 0' },
   headerTitle: { fontWeight: 600, fontSize: '0.95rem' },
@@ -109,8 +109,8 @@ const s = {
   input: { flex: 1, padding: '0.5rem 0.6rem', border: '1px solid #ced4da', borderRadius: '8px', fontSize: '0.85rem', outline: 'none' },
   sendBtn: { padding: '0.5rem 0.85rem', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, minHeight: '40px' },
   fab: {
-    position: 'fixed', bottom: '20px', right: '20px', width: '56px', height: '56px', borderRadius: '50%',
-    background: '#0d6efd', color: '#fff', border: 'none', fontSize: '1.5rem', cursor: 'pointer',
-    boxShadow: '0 4px 16px rgba(13,110,253,0.35)', zIndex: 199, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    position: 'fixed', bottom: '16px', right: '16px', width: '48px', height: '48px', borderRadius: '50%',
+    background: '#0d6efd', color: '#fff', border: 'none', fontSize: '1.25rem', cursor: 'pointer',
+    boxShadow: '0 4px 14px rgba(13,110,253,0.3)', zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
 };

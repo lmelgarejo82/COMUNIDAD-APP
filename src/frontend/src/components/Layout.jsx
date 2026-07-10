@@ -30,6 +30,7 @@ export default function Layout() {
   const isAdmin = user?.role === 'admin';
   const isAccessOperator = user?.role === 'access_operator';
   const isMobile = width < 640;
+  const showFloatingSupport = width >= 768 && !menuOpen && !notifOpen;
 
   useEffect(() => {
     fetchCount();
@@ -187,12 +188,16 @@ export default function Layout() {
         </div>
       )}
 
-      <main>
+      <main style={styles.main}>
         <Outlet key={selectedId} />
       </main>
 
-      <ChatWidget />
-      <WhatsAppButton />
+      {showFloatingSupport && (
+        <>
+          <ChatWidget />
+          <WhatsAppButton />
+        </>
+      )}
     </div>
   );
 }
@@ -214,6 +219,7 @@ const styles = {
     background: '#FFFFFF', zIndex: 98, overflowY: 'auto', paddingBottom: '4rem',
   },
   nav: { display: 'flex', gap: '0.2rem', alignItems: 'center' },
+  main: { paddingBottom: '96px' },
   user: { display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', color: '#FFFFFF' },
   roleBadge: { padding: '0.1rem 0.5rem', background: 'rgba(255,255,255,0.15)', borderRadius: '4px', fontSize: '0.68rem', textTransform: 'uppercase', color: '#FFFFFF' },
   logoutBtn: { padding: '0.35rem 0.8rem', background: 'transparent', color: '#E74C3C', border: '1px solid #E74C3C', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 },
