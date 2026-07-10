@@ -457,6 +457,28 @@ function buildTimeline(ticket) {
   return items;
 }
 
+function computeTicketKpis(baseTickets) {
+  return {
+    opened: baseTickets.filter(ticket => ticket.status === 'sent').length,
+    review: baseTickets.filter(ticket => ticket.status === 'in_review').length,
+    progress: baseTickets.filter(ticket => ticket.status === 'in_progress').length,
+    resolved: baseTickets.filter(ticket => ticket.status === 'resolved').length,
+    urgent: baseTickets.filter(ticket => ticket.priority === 'urgent').length,
+    active: baseTickets.filter(ticket => isActiveStatus(ticket.status)).length,
+  };
+}
+
+function filterTickets(baseTickets, filters, quickFilter, activeTab, { isAdmin, userId }) {
+  return baseTickets.filter(ticket => {
+    if (quickFilter?.field && ticket[quickFilter.field] !== quickFilter.value) return false;
+    if (filters.category && ticket.category !== filters.category) return false;
+    if (filters.priority && ticket.priority !== filters.priority) return false;
+    if (!matchesSearch(ticket, filters)) return false;
+    if (activeTab === 'mine' && isAdmin && ticket.user_id !== userId) return false;
+    return true;
+  });
+}
+
 export default function Tickets() {
   const { user } = useAuth();
   const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < 760);
@@ -472,11 +494,9 @@ export default function Tickets() {
   const [activeTab, setActiveTab] = useState('all');
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const isAdmin = user?.role === 'admin';
 
-  useEffect(() => { load(); }, [page, filters.category, filters.priority, quickFilter?.field, quickFilter?.value, isAdmin]);
+  useEffect(() => { load(); }, [isAdmin]);
   useEffect(() => {
     const onResize = () => setIsNarrow(window.innerWidth < 760);
     window.addEventListener('resize', onResize);
@@ -487,17 +507,10 @@ export default function Tickets() {
     setLoading(true);
     setError('');
     try {
-      const mergedFilters = {
-        category: filters.category,
-        priority: filters.priority,
-      };
-      if (quickFilter?.field) mergedFilters[quickFilter.field] = quickFilter.value;
-      const serverFilters = Object.fromEntries(Object.entries(mergedFilters).filter(([, value]) => value));
       const { data } = isAdmin
-        ? await ticketService.listAll(page, serverFilters)
-        : await ticketService.listMy(page, serverFilters);
+        ? await ticketService.listAll(1, { limit: 500 })
+        : await ticketService.listMy(1, { limit: 500 });
       setTickets(data.data || []);
-      setTotalPages(data.totalPages || 1);
     } catch (err) {
       setError(getErrorMessage(err, 'Error al cargar tickets'));
     } finally {
@@ -505,14 +518,7 @@ export default function Tickets() {
     }
   }
 
-  const kpis = useMemo(() => ({
-    opened: tickets.filter(ticket => ticket.status === 'sent').length,
-    review: tickets.filter(ticket => ticket.status === 'in_review').length,
-    progress: tickets.filter(ticket => ticket.status === 'in_progress').length,
-    resolved: tickets.filter(ticket => ticket.status === 'resolved').length,
-    urgent: tickets.filter(ticket => ticket.priority === 'urgent').length,
-    active: tickets.filter(ticket => isActiveStatus(ticket.status)).length,
-  }), [tickets]);
+  const kpis = useMemo(() => computeTicketKpis(tickets), [tickets]);
 
   const tabCounts = useMemo(() => ({
     all: tickets.length,
@@ -521,20 +527,16 @@ export default function Tickets() {
     overdue: 0,
   }), [tickets, isAdmin, user?.id]);
 
-  const visibleTickets = useMemo(() => {
-    return tickets.filter(ticket => {
-      if (!matchesSearch(ticket, filters)) return false;
-      if (activeTab === 'mine' && isAdmin && ticket.user_id !== user?.id) return false;
-      return true;
-    });
-  }, [tickets, filters, activeTab, isAdmin, user?.id]);
+  const visibleTickets = useMemo(
+    () => filterTickets(tickets, filters, quickFilter, activeTab, { isAdmin, userId: user?.id }),
+    [tickets, filters, quickFilter, activeTab, isAdmin, user?.id]
+  );
 
   function updateForm(field, value) {
     setForm(prev => ({ ...prev, [field]: value }));
   }
 
   function updateFilter(field, value) {
-    setPage(1);
     setFilters(prev => ({ ...prev, [field]: value }));
     if (field === 'priority' && quickFilter?.field === 'priority') {
       setQuickFilter(null);
@@ -542,7 +544,6 @@ export default function Tickets() {
   }
 
   function applyKpiFilter(key) {
-    setPage(1);
     const next = KPI_FILTERS[key];
     if (!next) return;
     if (quickFilter?.field === next.field && quickFilter.value === next.value) {
@@ -556,14 +557,12 @@ export default function Tickets() {
   }
 
   function clearAllFilters() {
-    setPage(1);
     setFilters(initialFilters);
     setQuickFilter(null);
     setActiveTab('all');
   }
 
   function clearFilterField(field) {
-    setPage(1);
     if (field === 'tab') {
       setActiveTab('all');
       return;
@@ -625,7 +624,6 @@ export default function Tickets() {
       setForm(initialForm);
       setShowCreate(false);
       setMsg('Ticket creado correctamente');
-      setPage(1);
       await load();
     } catch (err) {
       setError(getErrorMessage(err, 'Error al crear ticket'));
@@ -644,7 +642,7 @@ export default function Tickets() {
   const subtitle = isAdmin
     ? `Gestión de incidencias del complejo · ${tickets.length} tickets totales`
     : `Tus tickets y reclamos · ${kpis.active} activos`;
-  const hasClientFilters = Boolean(filters.query || filters.date || filters.unit || activeTab !== 'all' || quickFilter);
+  const hasClientFilters = Boolean(filters.query || filters.date || filters.unit || filters.category || filters.priority || activeTab !== 'all' || quickFilter);
 
   return (
     <div style={t.page}>
@@ -703,14 +701,6 @@ export default function Tickets() {
         isNarrow
           ? <div style={styles.mobileList}>{visibleTickets.map(ticket => <TicketCard key={ticket.id} ticket={ticket} isAdmin={isAdmin} onSelect={openTicket} compact />)}</div>
           : <TicketTable tickets={visibleTickets} isAdmin={isAdmin} onSelect={openTicket} />
-      )}
-
-      {totalPages > 1 && (
-        <div style={styles.pagination}>
-          <button type="button" onClick={() => setPage(prev => Math.max(1, prev - 1))} disabled={page <= 1} style={t.secondaryBtn}>Anterior</button>
-          <span style={styles.meta}>Página {page} de {totalPages}</span>
-          <button type="button" onClick={() => setPage(prev => Math.min(totalPages, prev + 1))} disabled={page >= totalPages} style={t.secondaryBtn}>Siguiente</button>
-        </div>
       )}
 
       {showCreate && !isAdmin && (
@@ -780,7 +770,6 @@ const styles = {
   ticketAsideCompact: { display: 'flex', gap: '0.3rem', alignItems: 'center', flexWrap: 'wrap', paddingRight: '3.4rem' },
   categoryChip: { ...t.badge(t.colors.primary, t.colors.primarySoft), border: `1px solid ${t.colors.border}` },
   meta: { display: 'block', fontSize: '0.74rem', color: t.colors.textSecondary },
-  pagination: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', marginTop: '0.9rem', flexWrap: 'wrap' },
   skeletonList: { ...t.card, padding: '1rem', display: 'grid', placeItems: 'center', gap: '0.75rem', color: t.colors.textSecondary },
   emptyState: { ...t.card, padding: '1.35rem', display: 'grid', gap: '0.35rem', color: t.colors.textSecondary, textAlign: 'center', justifyItems: 'center' },
   overlay: { position: 'fixed', inset: 0, background: 'rgba(15,59,94,0.20)', zIndex: 180, display: 'flex', justifyContent: 'flex-end' },
