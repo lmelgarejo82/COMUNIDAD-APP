@@ -127,8 +127,41 @@ export default function DigitalInvitationPanel({ preauthorization }) {
     }
   }
 
+  async function shareInvitation() {
+    if (!generated?.invitation_url) return;
+    if (!navigator.share) {
+      setError('Tu navegador no permite compartir directamente. Copiá el enlace o el mensaje.');
+      return;
+    }
+
+    try {
+      await navigator.share({
+        title: 'Invitación de acceso',
+        text: `Tenés una invitación para ingresar a ${getShareContext()}. Mostrá este enlace o QR en portería.`,
+        url: generated.invitation_url,
+      });
+      setMessage('Invitación compartida');
+      setError('');
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        setMessage('Acción de compartir cancelada.');
+        setError('');
+        return;
+      }
+      setError('No pudimos abrir el diálogo de compartir. Copiá el enlace o el mensaje.');
+    }
+  }
+
+  function openWhatsApp() {
+    if (!shareMessageDraft.trim()) return;
+    const url = `https://wa.me/?text=${encodeURIComponent(shareMessageDraft)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setMessage('WhatsApp abierto. El envío queda a cargo del usuario.');
+    setError('');
+  }
+
   function getShareContext() {
-    return preauthorization.complex_name || preauthorization.community_name || preauthorization.destination_label || 'la comunidad';
+    return preauthorization.complex_name || preauthorization.community_name || 'la comunidad';
   }
 
   function getInvitationCode() {
@@ -226,6 +259,14 @@ export default function DigitalInvitationPanel({ preauthorization }) {
                     Copiar código
                   </button>
                 </div>
+                <div style={styles.assistedActions}>
+                  <button type="button" onClick={shareInvitation} style={t.secondaryBtn}>
+                    Compartir
+                  </button>
+                  <button type="button" onClick={openWhatsApp} style={t.secondaryBtn}>
+                    Abrir WhatsApp
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -240,6 +281,12 @@ export default function DigitalInvitationPanel({ preauthorization }) {
                 style={{ ...t.input, resize: 'vertical', marginBottom: 0 }}
               />
               <div style={styles.actions}>
+                <button type="button" onClick={shareInvitation} style={t.secondaryBtn}>
+                  Compartir
+                </button>
+                <button type="button" onClick={openWhatsApp} style={t.secondaryBtn}>
+                  Abrir WhatsApp
+                </button>
                 <button type="button" onClick={() => copyText(shareMessageDraft, 'Mensaje copiado')} style={t.primaryBtn}>
                   Copiar mensaje
                 </button>
@@ -301,6 +348,7 @@ const styles = {
   qrImage: { width: '220px', height: '220px', display: 'block' },
   generatedInfo: { display: 'grid', gap: '0.35rem', fontSize: '0.82rem', color: t.colors.textSecondary },
   copyRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.45rem', alignItems: 'start' },
+  assistedActions: { display: 'flex', justifyContent: 'flex-start', gap: '0.45rem', flexWrap: 'wrap' },
   actions: { display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' },
   detailGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.5rem', fontSize: '0.82rem', color: t.colors.textSecondary },
   list: { display: 'grid', gap: '0.45rem' },
