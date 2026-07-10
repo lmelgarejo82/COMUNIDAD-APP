@@ -253,9 +253,9 @@ function TicketDetailPanel({ ticket, isAdmin, saving, replyMsg, onReplyMsg, onRe
             <h3 style={styles.detailTitle}>{ticket.title}</h3>
             <p style={styles.detailDescription}>{ticket.description || 'Sin descripción'}</p>
             <div style={styles.detailGrid}>
-              <span><strong>Ubicación</strong>{ticket.location_label || '-'}</span>
-              <span><strong>Unidad</strong>{ticket.unit_number || '-'}</span>
-              <span><strong>Actualizado</strong>{formatDate(ticket.updated_at)}</span>
+              <span style={styles.detailField}><strong>Ubicación</strong>{ticket.location_label || '-'}</span>
+              <span style={styles.detailField}><strong>Unidad</strong>{ticket.unit_number || '-'}</span>
+              <span style={styles.detailField}><strong>Actualizado</strong>{formatDate(ticket.updated_at)}</span>
             </div>
           </section>
 
@@ -333,12 +333,12 @@ function TicketTimeline({ items, replies }) {
   );
 }
 
-function TicketCard({ ticket, isAdmin, onSelect }) {
+function TicketCard({ ticket, isAdmin, onSelect, compact = false }) {
   return (
     <button type="button" style={styles.ticketCard} onClick={() => onSelect(ticket)}>
-      <div style={styles.ticketMain}>
+      <div style={compact ? styles.ticketMainCompact : styles.ticketMain}>
         <div>
-          <div style={styles.ticketTitleRow}>
+          <div style={compact ? styles.ticketTitleRowCompact : styles.ticketTitleRow}>
             <strong style={styles.ticketTitle}>{ticket.title}</strong>
             <TicketStatusChip status={ticket.status} />
           </div>
@@ -349,7 +349,7 @@ function TicketCard({ ticket, isAdmin, onSelect }) {
             {isAdmin && ticket.user_email && <span>{ticket.user_email}</span>}
           </div>
         </div>
-        <div style={styles.ticketAside}>
+        <div style={compact ? styles.ticketAsideCompact : styles.ticketAside}>
           <TicketPriorityChip priority={ticket.priority} />
           <TicketCategoryChip category={ticket.category} />
           <span style={styles.meta}>Actualizado {formatDate(ticket.updated_at)}</span>
@@ -631,7 +631,7 @@ export default function Tickets() {
         <EmptyState type={hasClientFilters ? 'search' : 'empty'} isAdmin={isAdmin} onCreate={() => setShowCreate(true)} />
       ) : (
         isNarrow
-          ? <div style={styles.mobileList}>{visibleTickets.map(ticket => <TicketCard key={ticket.id} ticket={ticket} isAdmin={isAdmin} onSelect={openTicket} />)}</div>
+          ? <div style={styles.mobileList}>{visibleTickets.map(ticket => <TicketCard key={ticket.id} ticket={ticket} isAdmin={isAdmin} onSelect={openTicket} compact />)}</div>
           : <TicketTable tickets={visibleTickets} isAdmin={isAdmin} onSelect={openTicket} />
       )}
 
@@ -680,7 +680,7 @@ const styles = {
   tab: { border: 'none', background: 'transparent', color: t.colors.textSecondary, borderRadius: t.radius.input, padding: '0.42rem 0.65rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', display: 'flex', gap: '0.35rem', alignItems: 'center' },
   tabActive: { border: 'none', background: t.colors.primarySoft, color: t.colors.primary, borderRadius: t.radius.input, padding: '0.42rem 0.65rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', display: 'flex', gap: '0.35rem', alignItems: 'center' },
   tabCount: { fontSize: '0.68rem', background: t.colors.white, border: `1px solid ${t.colors.border}`, color: t.colors.textSecondary, borderRadius: '999px', padding: '0 0.35rem' },
-  filterBar: { ...t.card, padding: '0.65rem', display: 'grid', gridTemplateColumns: 'minmax(220px, 1.5fr) repeat(5, minmax(120px, 1fr))', gap: '0.45rem', alignItems: 'start', marginBottom: '0.75rem' },
+  filterBar: { ...t.card, padding: '0.65rem', display: 'grid', gridTemplateColumns: 'minmax(280px, 1.8fr) repeat(5, minmax(115px, 1fr))', gap: '0.45rem', alignItems: 'start', marginBottom: '0.75rem' },
   filterBarCompact: { ...t.card, padding: '0.65rem', display: 'grid', gridTemplateColumns: '1fr', gap: '0.45rem', alignItems: 'start', marginBottom: '0.75rem' },
   searchWrap: { position: 'relative' },
   searchIcon: { position: 'absolute', left: '0.55rem', top: '0.43rem', color: t.colors.textSecondary, fontSize: '0.9rem' },
@@ -693,11 +693,14 @@ const styles = {
   mobileList: { display: 'grid', gap: '0.55rem' },
   ticketCard: { ...t.card, padding: '0.8rem', textAlign: 'left', cursor: 'pointer', width: '100%', background: t.colors.white },
   ticketMain: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '0.75rem' },
+  ticketMainCompact: { display: 'grid', gridTemplateColumns: '1fr', gap: '0.55rem' },
   ticketTitleRow: { display: 'flex', gap: '0.4rem', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap' },
+  ticketTitleRowCompact: { display: 'flex', gap: '0.4rem', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', paddingRight: '3.4rem' },
   ticketTitle: { color: t.colors.textPrimary, fontSize: '0.93rem' },
   ticketDescription: { margin: '0.25rem 0', color: t.colors.textSecondary, fontSize: '0.82rem', lineHeight: 1.45 },
   ticketMeta: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap', color: t.colors.textSecondary, fontSize: '0.74rem' },
   ticketAside: { display: 'flex', flexDirection: 'column', gap: '0.3rem', alignItems: 'flex-end' },
+  ticketAsideCompact: { display: 'flex', gap: '0.3rem', alignItems: 'center', flexWrap: 'wrap', paddingRight: '3.4rem' },
   categoryChip: { ...t.badge(t.colors.primary, t.colors.primarySoft), border: `1px solid ${t.colors.border}` },
   meta: { display: 'block', fontSize: '0.74rem', color: t.colors.textSecondary },
   pagination: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', marginTop: '0.9rem', flexWrap: 'wrap' },
@@ -708,7 +711,7 @@ const styles = {
   panelHeader: { position: 'sticky', top: 0, zIndex: 1, background: t.colors.white, borderBottom: `1px solid ${t.colors.border}`, padding: '1rem 1.1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' },
   panelTitle: { ...t.font.title, margin: 0 },
   closeBtn: { border: 'none', background: 'transparent', fontSize: '1.55rem', cursor: 'pointer', color: t.colors.textSecondary, lineHeight: 1 },
-  panelBody: { padding: '1rem 1.1rem', display: 'grid', gap: '0.85rem' },
+  panelBody: { padding: '1rem 1.1rem 5.5rem', display: 'grid', gap: '0.85rem' },
   panelSection: { display: 'grid', gap: '0.55rem' },
   panelSectionTitle: { margin: 0, fontSize: '0.9rem', fontWeight: 800, color: t.colors.textPrimary },
   pillGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.45rem' },
@@ -719,12 +722,13 @@ const styles = {
   priorityActive: (priority) => ({ border: `1px solid ${priority.color}`, background: priority.bg, borderRadius: t.radius.input, padding: '0.55rem', display: 'grid', gap: '0.1rem', textAlign: 'left', cursor: 'pointer', color: t.colors.textPrimary, fontSize: '0.75rem', boxShadow: priority.glow ? '0 0 0 2px rgba(231,76,60,0.08)' : 'none' }),
   hint: { margin: 0, fontSize: '0.74rem', color: t.colors.textSecondary, lineHeight: 1.4 },
   readonlyField: { border: `1px dashed ${t.colors.border}`, borderRadius: t.radius.input, padding: '0.55rem', display: 'grid', gap: '0.12rem', fontSize: '0.78rem', color: t.colors.textSecondary },
-  panelActions: { display: 'flex', justifyContent: 'flex-end', gap: '0.45rem', flexWrap: 'wrap', paddingTop: '0.25rem' },
+  panelActions: { display: 'flex', justifyContent: 'flex-end', gap: '0.45rem', flexWrap: 'wrap', padding: '0.25rem 4.6rem 0 0', marginBottom: '2rem' },
   chipRow: { display: 'flex', gap: '0.35rem', flexWrap: 'wrap' },
   detailBlock: { ...t.card, padding: '0.8rem', display: 'grid', gap: '0.55rem' },
   detailTitle: { margin: 0, fontSize: '1rem', color: t.colors.textPrimary },
   detailDescription: { margin: 0, color: t.colors.textPrimary, fontSize: '0.86rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
   detailGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: '0.45rem', fontSize: '0.78rem', color: t.colors.textSecondary },
+  detailField: { display: 'grid', gap: '0.12rem' },
   statusActions: { display: 'flex', gap: '0.4rem', flexWrap: 'wrap' },
   inlineCheck: { display: 'flex', gap: '0.4rem', alignItems: 'center', fontSize: '0.8rem', color: t.colors.textSecondary },
   timeline: { display: 'grid', gap: '0.65rem' },
