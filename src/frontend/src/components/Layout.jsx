@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCommunity } from '../context/CommunityContext';
 import { notificationService } from '../services/comunicacion';
-import ChatWidget from './ChatWidget';
 import WhatsAppButton from './WhatsAppButton';
 import ScopeSelector from './ScopeSelector';
+
+const ChatWidget = lazy(() => import('./ChatWidget'));
 
 function useWindowWidth() {
   const [width, setWidth] = useState(window.innerWidth);
@@ -194,7 +195,9 @@ export default function Layout() {
 
       {showFloatingSupport && (
         <>
-          <ChatWidget />
+          <Suspense fallback={null}>
+            <ChatWidget />
+          </Suspense>
           <WhatsAppButton />
         </>
       )}

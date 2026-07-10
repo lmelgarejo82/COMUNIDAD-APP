@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import QRCode from 'qrcode';
 import t from '../../../theme';
 import { accessPreauthorizationService } from '../../../services/accessLogs';
 import { formatDateTime } from './preauthorizationUtils';
@@ -53,7 +52,10 @@ export default function DigitalInvitationPanel({ preauthorization }) {
         setQrDataUrl('');
         return;
       }
-      const dataUrl = await QRCode.toDataURL(generated.invitation_url, {
+      const qrModule = await import('qrcode');
+      const toDataURL = qrModule.toDataURL || qrModule.default?.toDataURL;
+      if (!toDataURL) throw new Error('QRCode renderer unavailable');
+      const dataUrl = await toDataURL(generated.invitation_url, {
         width: 220,
         margin: 1,
         color: { dark: t.colors.primary, light: '#FFFFFF' },
