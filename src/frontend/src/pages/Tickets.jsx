@@ -34,9 +34,17 @@ const STATUS_OPTIONS = [
 const TAB_OPTIONS = [
   { value: 'all', label: 'Todos' },
   { value: 'mine', label: 'Míos' },
-  { value: 'unassigned', label: 'Sin asignar' },
-  { value: 'overdue', label: 'Vencidos' },
+  { value: 'unassigned', label: 'Sin asignar', disabled: true, reason: 'Pendiente de asignación real' },
+  { value: 'overdue', label: 'Vencidos', disabled: true, reason: 'Pendiente de SLA real' },
 ];
+
+const KPI_FILTERS = {
+  sent: { field: 'status', value: 'sent', label: 'Abiertos' },
+  in_review: { field: 'status', value: 'in_review', label: 'En revisión' },
+  in_progress: { field: 'status', value: 'in_progress', label: 'En proceso' },
+  resolved: { field: 'status', value: 'resolved', label: 'Resueltos' },
+  urgent: { field: 'priority', value: 'urgent', label: 'Urgentes' },
+};
 
 const initialForm = {
   category: 'maintenance',
@@ -47,7 +55,6 @@ const initialForm = {
 };
 
 const initialFilters = {
-  status: '',
   category: '',
   priority: '',
   query: '',
@@ -66,11 +73,6 @@ function optionLabel(options, value) {
 function formatDate(value) {
   if (!value) return '-';
   return new Date(value).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
-}
-
-function daysSince(value) {
-  if (!value) return 0;
-  return Math.floor((Date.now() - new Date(value).getTime()) / 86400000);
 }
 
 function isActiveStatus(status) {
@@ -119,8 +121,11 @@ function chipStyle(opt) {
 
 function TicketKpiCard({ label, value, hint, color, active, onClick }) {
   return (
-    <button type="button" onClick={onClick} style={{ ...styles.kpiCard, borderTopColor: color, outline: active ? `2px solid ${color}` : 'none' }}>
-      <span style={styles.kpiLabel}>{label}</span>
+    <button type="button" aria-pressed={active} onClick={onClick} style={{ ...styles.kpiCard, ...(active ? styles.kpiCardActive(color) : {}), borderTopColor: color }}>
+      <span style={styles.kpiLabel}>
+        {label}
+        {active && <span style={styles.kpiActiveMark}>Activo</span>}
+      </span>
       <strong style={styles.kpiValue}>{value}</strong>
       <span style={styles.kpiHint}>{hint}</span>
     </button>
@@ -132,9 +137,16 @@ function TicketTabs({ active, onChange, isAdmin, counts }) {
   return (
     <div style={styles.tabs}>
       {visibleTabs.map(tab => (
-        <button key={tab.value} type="button" onClick={() => onChange(tab.value)} style={active === tab.value ? styles.tabActive : styles.tab}>
+        <button
+          key={tab.value}
+          type="button"
+          disabled={tab.disabled}
+          title={tab.reason || ''}
+          onClick={() => !tab.disabled && onChange(tab.value)}
+          style={tab.disabled ? styles.tabDisabled : active === tab.value ? styles.tabActive : styles.tab}
+        >
           {tab.label}
-          <span style={styles.tabCount}>{counts[tab.value] || 0}</span>
+          <span style={styles.tabCount}>{tab.disabled ? 0 : counts[tab.value] || 0}</span>
         </button>
       ))}
     </div>
@@ -158,7 +170,7 @@ function TicketFilters({ filters, onChange, onClear, compact }) {
         <option value="today">Hoy</option>
       </select>
       <select value={filters.category} onChange={(e) => onChange('category', e.target.value)} style={t.input}>
-        <option value="">Categoria</option>
+        <option value="">Categoría</option>
         {CATEGORY_OPTIONS.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}
       </select>
       <select value={filters.priority} onChange={(e) => onChange('priority', e.target.value)} style={t.input}>
@@ -168,6 +180,30 @@ function TicketFilters({ filters, onChange, onClear, compact }) {
       <input value={filters.unit} onChange={(e) => onChange('unit', e.target.value)} placeholder="Unidad" style={t.input} />
       <button type="button" onClick={onClear} style={t.secondaryBtn}>Limpiar</button>
     </section>
+  );
+}
+
+function ActiveFilterSummary({ quickFilter, filters, activeTab, onClearQuick, onClearField, onClearAll }) {
+  const chips = [];
+  if (quickFilter) chips.push({ key: 'quick', label: `Filtro rápido: ${quickFilter.label}`, onClear: onClearQuick });
+  if (activeTab !== 'all') chips.push({ key: 'tab', label: `Vista: ${optionLabel(TAB_OPTIONS, activeTab)}`, onClear: () => onClearField('tab') });
+  if (filters.query) chips.push({ key: 'query', label: `Búsqueda: ${filters.query}`, onClear: () => onClearField('query') });
+  if (filters.date === 'today') chips.push({ key: 'date', label: 'Hoy', onClear: () => onClearField('date') });
+  if (filters.category) chips.push({ key: 'category', label: optionLabel(CATEGORY_OPTIONS, filters.category), onClear: () => onClearField('category') });
+  if (filters.priority) chips.push({ key: 'priority', label: `Prioridad: ${optionLabel(PRIORITY_OPTIONS, filters.priority)}`, onClear: () => onClearField('priority') });
+  if (filters.unit) chips.push({ key: 'unit', label: `Unidad: ${filters.unit}`, onClear: () => onClearField('unit') });
+  if (!chips.length) return null;
+
+  return (
+    <div style={styles.activeFilters}>
+      <span style={styles.activeFiltersLabel}>Filtros activos</span>
+      {chips.map(chip => (
+        <button key={chip.key} type="button" onClick={chip.onClear} style={styles.filterChip}>
+          {chip.label} ×
+        </button>
+      ))}
+      <button type="button" onClick={onClearAll} style={styles.clearInlineBtn}>Limpiar todo</button>
+    </div>
   );
 }
 
@@ -432,6 +468,7 @@ export default function Tickets() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [filters, setFilters] = useState(initialFilters);
+  const [quickFilter, setQuickFilter] = useState(null);
   const [activeTab, setActiveTab] = useState('all');
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
@@ -439,7 +476,7 @@ export default function Tickets() {
   const [totalPages, setTotalPages] = useState(1);
   const isAdmin = user?.role === 'admin';
 
-  useEffect(() => { load(); }, [page, filters.status, filters.category, filters.priority, isAdmin]);
+  useEffect(() => { load(); }, [page, filters.category, filters.priority, quickFilter?.field, quickFilter?.value, isAdmin]);
   useEffect(() => {
     const onResize = () => setIsNarrow(window.innerWidth < 760);
     window.addEventListener('resize', onResize);
@@ -450,9 +487,12 @@ export default function Tickets() {
     setLoading(true);
     setError('');
     try {
-      const serverFilters = Object.fromEntries(
-        Object.entries({ status: filters.status, category: filters.category, priority: filters.priority }).filter(([, value]) => value)
-      );
+      const mergedFilters = {
+        category: filters.category,
+        priority: filters.priority,
+      };
+      if (quickFilter?.field) mergedFilters[quickFilter.field] = quickFilter.value;
+      const serverFilters = Object.fromEntries(Object.entries(mergedFilters).filter(([, value]) => value));
       const { data } = isAdmin
         ? await ticketService.listAll(page, serverFilters)
         : await ticketService.listMy(page, serverFilters);
@@ -477,16 +517,14 @@ export default function Tickets() {
   const tabCounts = useMemo(() => ({
     all: tickets.length,
     mine: isAdmin ? tickets.filter(ticket => ticket.user_id === user?.id).length : tickets.length,
-    unassigned: tickets.filter(ticket => !ticket.assigned_to && isActiveStatus(ticket.status)).length,
-    overdue: tickets.filter(ticket => isActiveStatus(ticket.status) && daysSince(ticket.created_at) >= 7).length,
+    unassigned: 0,
+    overdue: 0,
   }), [tickets, isAdmin, user?.id]);
 
   const visibleTickets = useMemo(() => {
     return tickets.filter(ticket => {
       if (!matchesSearch(ticket, filters)) return false;
       if (activeTab === 'mine' && isAdmin && ticket.user_id !== user?.id) return false;
-      if (activeTab === 'unassigned' && (!isActiveStatus(ticket.status) || ticket.assigned_to)) return false;
-      if (activeTab === 'overdue' && (!isActiveStatus(ticket.status) || daysSince(ticket.created_at) < 7)) return false;
       return true;
     });
   }, [tickets, filters, activeTab, isAdmin, user?.id]);
@@ -498,15 +536,39 @@ export default function Tickets() {
   function updateFilter(field, value) {
     setPage(1);
     setFilters(prev => ({ ...prev, [field]: value }));
+    if (field === 'priority' && quickFilter?.field === 'priority') {
+      setQuickFilter(null);
+    }
   }
 
-  function applyKpiFilter(type) {
+  function applyKpiFilter(key) {
     setPage(1);
-    if (type === 'urgent') {
-      setFilters(prev => ({ ...prev, priority: prev.priority === 'urgent' ? '' : 'urgent' }));
+    const next = KPI_FILTERS[key];
+    if (!next) return;
+    if (quickFilter?.field === next.field && quickFilter.value === next.value) {
+      setQuickFilter(null);
       return;
     }
-    setFilters(prev => ({ ...prev, status: prev.status === type ? '' : type }));
+    setQuickFilter(next);
+    if (next.field === 'priority') {
+      setFilters(prev => ({ ...prev, priority: '' }));
+    }
+  }
+
+  function clearAllFilters() {
+    setPage(1);
+    setFilters(initialFilters);
+    setQuickFilter(null);
+    setActiveTab('all');
+  }
+
+  function clearFilterField(field) {
+    setPage(1);
+    if (field === 'tab') {
+      setActiveTab('all');
+      return;
+    }
+    setFilters(prev => ({ ...prev, [field]: '' }));
   }
 
   async function handleStatusChange(ticketId, status) {
@@ -582,7 +644,7 @@ export default function Tickets() {
   const subtitle = isAdmin
     ? `Gestión de incidencias del complejo · ${tickets.length} tickets totales`
     : `Tus tickets y reclamos · ${kpis.active} activos`;
-  const hasClientFilters = Boolean(filters.query || filters.date || filters.unit || activeTab !== 'all');
+  const hasClientFilters = Boolean(filters.query || filters.date || filters.unit || activeTab !== 'all' || quickFilter);
 
   return (
     <div style={t.page}>
@@ -605,15 +667,23 @@ export default function Tickets() {
       )}
 
       <section style={styles.kpiGrid}>
-        <TicketKpiCard label="Abiertos" value={kpis.opened} hint="Sin tomar" color={t.colors.info} active={filters.status === 'sent'} onClick={() => applyKpiFilter('sent')} />
-        <TicketKpiCard label="En revisión" value={kpis.review} hint="En análisis" color={t.colors.info} active={filters.status === 'in_review'} onClick={() => applyKpiFilter('in_review')} />
-        <TicketKpiCard label="En proceso" value={kpis.progress} hint="Con seguimiento" color={t.colors.accent} active={filters.status === 'in_progress'} onClick={() => applyKpiFilter('in_progress')} />
-        <TicketKpiCard label="Resueltos" value={kpis.resolved} hint="Finalizados" color={t.colors.success} active={filters.status === 'resolved'} onClick={() => applyKpiFilter('resolved')} />
-        <TicketKpiCard label="Urgentes" value={kpis.urgent} hint="Prioridad maxima" color={t.colors.danger} active={filters.priority === 'urgent'} onClick={() => applyKpiFilter('urgent')} />
+        <TicketKpiCard label="Abiertos" value={kpis.opened} hint="Sin tomar" color={t.colors.info} active={quickFilter?.value === 'sent'} onClick={() => applyKpiFilter('sent')} />
+        <TicketKpiCard label="En revisión" value={kpis.review} hint="En análisis" color={t.colors.info} active={quickFilter?.value === 'in_review'} onClick={() => applyKpiFilter('in_review')} />
+        <TicketKpiCard label="En proceso" value={kpis.progress} hint="Con seguimiento" color={t.colors.accent} active={quickFilter?.value === 'in_progress'} onClick={() => applyKpiFilter('in_progress')} />
+        <TicketKpiCard label="Resueltos" value={kpis.resolved} hint="Finalizados" color={t.colors.success} active={quickFilter?.value === 'resolved'} onClick={() => applyKpiFilter('resolved')} />
+        <TicketKpiCard label="Urgentes" value={kpis.urgent} hint="Prioridad máxima" color={t.colors.danger} active={quickFilter?.value === 'urgent'} onClick={() => applyKpiFilter('urgent')} />
       </section>
 
       <TicketTabs active={activeTab} onChange={setActiveTab} isAdmin={isAdmin} counts={tabCounts} />
-      <TicketFilters filters={filters} compact={isNarrow} onChange={updateFilter} onClear={() => { setPage(1); setFilters(initialFilters); setActiveTab('all'); }} />
+      <ActiveFilterSummary
+        quickFilter={quickFilter}
+        filters={filters}
+        activeTab={activeTab}
+        onClearQuick={() => setQuickFilter(null)}
+        onClearField={clearFilterField}
+        onClearAll={clearAllFilters}
+      />
+      <TicketFilters filters={filters} compact={isNarrow} onChange={updateFilter} onClear={clearAllFilters} />
 
       {loading ? (
         <div style={styles.skeletonList}>
@@ -673,13 +743,20 @@ export default function Tickets() {
 const styles = {
   kpiGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: '0.55rem', marginBottom: '0.75rem' },
   kpiCard: { ...t.card, padding: '0.75rem', borderTop: `3px solid ${t.colors.border}`, display: 'grid', gap: '0.16rem', textAlign: 'left', cursor: 'pointer', background: t.colors.white },
-  kpiLabel: { fontSize: '0.74rem', color: t.colors.textSecondary, fontWeight: 700 },
+  kpiCardActive: (color) => ({ background: t.colors.primarySoft, borderColor: color, boxShadow: `0 0 0 2px ${t.colors.primarySoft}` }),
+  kpiLabel: { fontSize: '0.74rem', color: t.colors.textSecondary, fontWeight: 700, display: 'flex', justifyContent: 'space-between', gap: '0.35rem', alignItems: 'center' },
+  kpiActiveMark: { fontSize: '0.62rem', color: t.colors.primary, background: t.colors.white, border: `1px solid ${t.colors.border}`, borderRadius: '999px', padding: '0 0.35rem' },
   kpiValue: { fontSize: '1.25rem', color: t.colors.textPrimary, lineHeight: 1 },
   kpiHint: { fontSize: '0.72rem', color: t.colors.textSecondary },
   tabs: { ...t.card, padding: '0.35rem', display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.6rem' },
   tab: { border: 'none', background: 'transparent', color: t.colors.textSecondary, borderRadius: t.radius.input, padding: '0.42rem 0.65rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', display: 'flex', gap: '0.35rem', alignItems: 'center' },
   tabActive: { border: 'none', background: t.colors.primarySoft, color: t.colors.primary, borderRadius: t.radius.input, padding: '0.42rem 0.65rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', display: 'flex', gap: '0.35rem', alignItems: 'center' },
+  tabDisabled: { border: 'none', background: 'transparent', color: t.colors.textDisabled, borderRadius: t.radius.input, padding: '0.42rem 0.65rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'not-allowed', display: 'flex', gap: '0.35rem', alignItems: 'center', opacity: 0.65 },
   tabCount: { fontSize: '0.68rem', background: t.colors.white, border: `1px solid ${t.colors.border}`, color: t.colors.textSecondary, borderRadius: '999px', padding: '0 0.35rem' },
+  activeFilters: { ...t.card, padding: '0.55rem 0.65rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.6rem' },
+  activeFiltersLabel: { fontSize: '0.73rem', color: t.colors.textSecondary, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0 },
+  filterChip: { border: `1px solid ${t.colors.primary}`, background: t.colors.primarySoft, color: t.colors.primary, borderRadius: '999px', padding: '0.25rem 0.55rem', fontSize: '0.76rem', fontWeight: 700, cursor: 'pointer' },
+  clearInlineBtn: { border: 'none', background: 'transparent', color: t.colors.textSecondary, fontSize: '0.76rem', fontWeight: 700, cursor: 'pointer', padding: '0.25rem 0.4rem' },
   filterBar: { ...t.card, padding: '0.65rem', display: 'grid', gridTemplateColumns: 'minmax(280px, 1.8fr) repeat(5, minmax(115px, 1fr))', gap: '0.45rem', alignItems: 'start', marginBottom: '0.75rem' },
   filterBarCompact: { ...t.card, padding: '0.65rem', display: 'grid', gridTemplateColumns: '1fr', gap: '0.45rem', alignItems: 'start', marginBottom: '0.75rem' },
   searchWrap: { position: 'relative' },
