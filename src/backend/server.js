@@ -37,9 +37,13 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
-app.use(globalLimiter);
 
 app.use('/uploads', uploadsAuth, express.static('uploads'));
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+app.use('/api', globalLimiter);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/expenses', expenseRoutes);
@@ -61,10 +65,6 @@ app.use('/api/access-logs', accessLogRoutes);
 app.use('/api/access-invitations', accessInvitationRoutes);
 app.use('/api/access-preauthorizations', accessPreauthorizationRoutes);
 app.use('/api', phoneRoutes);
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
 
 app.listen(PORT, () => {
   console.log(`Backend corriendo en http://localhost:${PORT}`);

@@ -29,6 +29,12 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.status === 429) {
+      error.isRateLimited = true;
+      error.retryAfter = error.response.data?.retryAfter
+        || Number.parseInt(error.response.headers?.['retry-after'], 10)
+        || null;
+    }
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
