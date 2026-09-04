@@ -2,6 +2,11 @@ const { Hierarchy } = require('../models/Hierarchy');
 const { AdminComplex } = require('../models/AdminComplex');
 const { pool } = require('../db');
 const { invalidatePattern } = require('../cache');
+const {
+  validateReorganizationEntries,
+  validateTotalLots,
+  validateTowerBatch,
+} = require('../services/hierarchyWorkLimits');
 
 function getComplexForCommunity(communityId) {
   return Hierarchy.getComplexes(communityId).then(r => r[0] || null);
@@ -202,11 +207,14 @@ exports.createBuilding = async (req, res) => {
 
     const bt = building_type || 'tower';
     const autoFloor = bt === 'block' || bt === 'house';
+    const lotValidation = autoFloor ? validateTotalLots(total_lots) : { value: undefined };
+    if (lotValidation.error) return res.status(400).json({ error: lotValidation.error });
+
     const result = await Hierarchy.createBuilding({
       complex_id: targetComplexId, name, address,
       building_type: bt, sort_order,
       autoFloor,
-      totalLots: autoFloor ? (parseInt(total_lots) || 1) : undefined,
+      totalLots: lotValidation.value,
     });
     invalidatePattern('hierarchy:tree:*').catch(() => {});
     res.status(201).json(result);
@@ -500,9 +508,9 @@ exports.moveBuilding = async (req, res) => {
 exports.reorganizeUnits = async (req, res) => {
   try {
     const { entries } = req.body;
-    if (!Array.isArray(entries) || entries.length === 0) {
-      return res.status(400).json({ error: 'entries debe ser un array no vacío' });
-    }
+    const workValidation = validateReorganizationEntries(entries);
+    if (workValidation.error) return res.status(400).json({ error: workValidation.error });
+
     for (const entry of entries) {
       const unitId = entry.unit_id || entry.id;
       if (unitId && !(await validateUnitOwnership(req.communityId, parseInt(unitId)))) {
@@ -613,7 +621,8 @@ exports.getAdminComplexes = async (req, res) => {
 // ──────────────────────────────────────────────
 
 exports.bulkCreate = async (req, res) => {
-  const client = await pool.connect();
+  let client;
+  let transactionStarted = false;
   try {
     const { complex_id, building, floors, total_lots } = req.body;
     if (!building?.name) {
@@ -622,10 +631,10 @@ exports.bulkCreate = async (req, res) => {
 
     const bt = building.building_type || 'tower';
     const isAutoFloor = bt === 'block' || bt === 'house';
-
-    if (!isAutoFloor && (!Array.isArray(floors) || floors.length === 0)) {
-      return res.status(400).json({ error: 'floors[] es requerido para tipo tower' });
-    }
+    const workValidation = isAutoFloor
+      ? validateTotalLots(total_lots)
+      : validateTowerBatch(floors);
+    if (workValidation.error) return res.status(400).json({ error: workValidation.error });
 
     const targetComplexId = complex_id || req.complexId;
     if (!targetComplexId) return res.status(400).json({ error: 'complex_id es requerido' });
@@ -633,7 +642,9 @@ exports.bulkCreate = async (req, res) => {
       return res.status(403).json({ error: 'El complejo no pertenece a tu comunidad' });
     }
 
+    client = await pool.connect();
     await client.query('BEGIN');
+    transactionStarted = true;
 
     const { rows: [bld] } = await client.query(
       `INSERT INTO buildings (complex_id, name, building_type, sort_order) VALUES ($1,$2,$3,$4) RETURNING *`,
@@ -650,7 +661,7 @@ exports.bulkCreate = async (req, res) => {
       );
       createdFloors.push(autoFloor);
 
-      const lots = parseInt(total_lots) || 1;
+      const lots = workValidation.value;
       const values = [];
       const params = [];
       for (let i = 1; i <= lots; i++) {
@@ -691,6 +702,7 @@ exports.bulkCreate = async (req, res) => {
     }
 
     await client.query('COMMIT');
+    transactionStarted = false;
     invalidatePattern('hierarchy:tree:*').catch(() => {});
 
     res.status(201).json({
@@ -700,11 +712,11 @@ exports.bulkCreate = async (req, res) => {
       summary: { buildings: 1, floors: createdFloors.length, units: createdUnits.length },
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (transactionStarted) await client.query('ROLLBACK');
     console.error('Error en bulkCreate:', err);
     res.status(500).json({ error: err.message });
   } finally {
-    client.release();
+    client?.release();
   }
 };
 

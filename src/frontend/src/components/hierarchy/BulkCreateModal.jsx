@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import t from '../../theme';
+import { HIERARCHY_WORK_LIMITS, parseHierarchyCount } from '../../utils/hierarchyWorkLimits';
 
 const flex1 = { flex: 1 };
 const fg = { marginBottom: '0.4rem' };
@@ -32,6 +33,34 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
   async function handleSave() {
     setErr('');
     if (!name && parentType === 'complex') { setErr('Nombre requerido'); return; }
+    let parsedTotalLots;
+    let parsedFloorCount;
+    let parsedUnitsPerFloor;
+    try {
+      if (parentType === 'complex' && isAutoFloor) {
+        parsedTotalLots = parseHierarchyCount(totalLots, {
+          label: 'Cantidad de lotes',
+          max: HIERARCHY_WORK_LIMITS.totalLots,
+        });
+      } else if (parentType === 'complex') {
+        parsedFloorCount = parseHierarchyCount(floorCount, {
+          label: 'Cantidad de pisos',
+          max: HIERARCHY_WORK_LIMITS.bulkFloors,
+        });
+        parsedUnitsPerFloor = parseHierarchyCount(unitsPerFloor, {
+          label: 'Unidades por piso',
+          max: HIERARCHY_WORK_LIMITS.unitsPerFloor,
+        });
+      } else {
+        parsedUnitsPerFloor = parseHierarchyCount(unitsPerFloor, {
+          label: 'Cantidad de unidades',
+          max: HIERARCHY_WORK_LIMITS.unitsPerFloor,
+        });
+      }
+    } catch (validationError) {
+      setErr(validationError.message);
+      return;
+    }
     setSaving(true);
     try {
       const building = { name: name || parentNode.name, building_type: buildingType, sort_order: 0 };
@@ -39,11 +68,11 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
 
       if (parentType === 'complex') {
         if (isAutoFloor) {
-          payload = { complex_id: parentNode.id, building, total_lots: parseInt(totalLots) || 1 };
+          payload = { complex_id: parentNode.id, building, total_lots: parsedTotalLots };
         } else {
           const floors = [];
-          const fc = parseInt(floorCount) || 1;
-          const upf = parseInt(unitsPerFloor) || 1;
+          const fc = parsedFloorCount;
+          const upf = parsedUnitsPerFloor;
           for (let f = 1; f <= fc; f++) {
             const units = [];
             for (let u = 1; u <= upf; u++) {
@@ -65,7 +94,7 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
         }
       } else if (parentType === 'building') {
         const units = [];
-        const upf = parseInt(unitsPerFloor) || 1;
+        const upf = parsedUnitsPerFloor;
         for (let u = 1; u <= upf; u++) {
           units.push({
             unit_code: (prefix ? `${prefix}U${u}` : `U${u}`),
@@ -86,7 +115,7 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
         };
       } else if (parentType === 'floor') {
         const units = [];
-        const upf = parseInt(unitsPerFloor) || 1;
+        const upf = parsedUnitsPerFloor;
         for (let u = 1; u <= upf; u++) {
           units.push({
             unit_code: (prefix ? `${prefix}U${u}` : `U${u}`),
@@ -137,11 +166,11 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <div style={flex1}>
                   <label style={lbl}>Cant. pisos</label>
-                  <input style={t.input} type="number" min="1" max="50" value={floorCount} onChange={e => setFloorCount(e.target.value)} />
+                  <input style={t.input} type="number" min="1" max={HIERARCHY_WORK_LIMITS.bulkFloors} value={floorCount} onChange={e => setFloorCount(e.target.value)} />
                 </div>
                 <div style={flex1}>
                   <label style={lbl}>Unid. por piso</label>
-                  <input style={t.input} type="number" min="1" max="100" value={unitsPerFloor} onChange={e => setUnitsPerFloor(e.target.value)} />
+                  <input style={t.input} type="number" min="1" max={HIERARCHY_WORK_LIMITS.unitsPerFloor} value={unitsPerFloor} onChange={e => setUnitsPerFloor(e.target.value)} />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -162,7 +191,7 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
             <>
               <div style={fg}>
                 <label style={lbl}>Cantidad de {buildingType === 'house' ? 'casas' : 'lotes'}</label>
-                <input style={t.input} type="number" min="1" max="200" value={totalLots} onChange={e => setTotalLots(e.target.value)} />
+                <input style={t.input} type="number" min="1" max={HIERARCHY_WORK_LIMITS.totalLots} value={totalLots} onChange={e => setTotalLots(e.target.value)} />
               </div>
               <p style={{ fontSize: '0.75rem', color: t.colors.textSecondary, margin: '0.25rem 0', fontStyle: 'italic' }}>
                 Se creará un piso automático "Planta Baja" con {totalLots} {buildingType === 'house' ? 'casas' : 'lotes'}
@@ -199,7 +228,7 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <div style={flex1}>
               <label style={lbl}>Unidades</label>
-              <input style={t.input} type="number" min="1" max="100" value={unitsPerFloor} onChange={e => setUnitsPerFloor(e.target.value)} />
+              <input style={t.input} type="number" min="1" max={HIERARCHY_WORK_LIMITS.unitsPerFloor} value={unitsPerFloor} onChange={e => setUnitsPerFloor(e.target.value)} />
             </div>
             <div style={flex1}>
               <label style={lbl}>Prefijo</label>
@@ -216,7 +245,7 @@ export default function BulkCreateModal({ parentType, parentNode, onSave, onClos
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <div style={flex1}>
               <label style={lbl}>Cant. de unidades</label>
-              <input style={t.input} type="number" min="1" max="100" value={unitsPerFloor} onChange={e => setUnitsPerFloor(e.target.value)} autoFocus />
+              <input style={t.input} type="number" min="1" max={HIERARCHY_WORK_LIMITS.unitsPerFloor} value={unitsPerFloor} onChange={e => setUnitsPerFloor(e.target.value)} autoFocus />
             </div>
             <div style={flex1}>
               <label style={lbl}>Prefijo</label>
