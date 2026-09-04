@@ -8,6 +8,7 @@ const { authorize } = require('../middleware/authorize');
 const { sanitize } = require('../middleware/sanitize');
 const { setCommunity } = require('../middleware/setCommunity');
 const { logAudit } = require('../middleware/logAudit');
+const { trackUploadedFile } = require('../middleware/uploadLifecycle');
 
 const storage = multer.diskStorage({
   destination: path.join(__dirname, '..', 'uploads'),
@@ -32,7 +33,7 @@ router.post('/', authenticate, authorize('admin'), setCommunity, sanitize('descr
 router.put('/:id', authenticate, authorize('admin'), setCommunity, sanitize('description', 'period'),
   logAudit('UPDATE_EXPENSE', (req, body) => ({ id: req.params.id, description: req.body.description })),
   expenseController.update);
-router.post('/:id/upload-file', authenticate, authorize('admin'), setCommunity, upload.single('file'), expenseController.uploadFile);
+router.post('/:id/upload-file', authenticate, authorize('admin'), setCommunity, upload.single('file'), trackUploadedFile, expenseController.uploadFile);
 router.get('/units', authenticate, authorize('admin'), setCommunity, expenseController.listAllUnits);
 router.get('/:id/units', authenticate, authorize('admin'), setCommunity, expenseController.listUnits);
 router.put('/unit/:unitExpenseId/confirm', authenticate, authorize('admin'), setCommunity,

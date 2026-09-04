@@ -180,6 +180,7 @@ exports.uploadFile = async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Archivo requerido' });
     const file_url = `/uploads/${req.file.filename}`;
     await Expense.updateFile(id, file_url);
+    req.retainUploadedFile?.();
     res.json({ file_url });
   } catch (err) {
     console.error('Error en uploadFile:', err);

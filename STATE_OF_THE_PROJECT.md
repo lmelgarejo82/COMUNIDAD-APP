@@ -1126,7 +1126,7 @@ function logAudit(action, getDetails = null) {
 
 ### Archivos estáticos protegidos
 
-`/uploads` requiere autenticación JWT (vía query `?token=` o header `Authorization: Bearer`). Implementado en `middleware/uploadsAuth.js`.
+`/uploads` requiere JWT vigente mediante `Authorization: Bearer` y autorización sobre una asociación de archivo confiable de la comunidad activa. Los tokens en query string no se aceptan.
 
 ---
 

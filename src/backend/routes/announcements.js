@@ -8,6 +8,7 @@ const { authorize } = require('../middleware/authorize');
 const { sanitize } = require('../middleware/sanitize');
 const { setCommunity } = require('../middleware/setCommunity');
 const { logAudit } = require('../middleware/logAudit');
+const { trackUploadedFile } = require('../middleware/uploadLifecycle');
 
 const storage = multer.diskStorage({
   destination: path.join(__dirname, '..', 'uploads'),
@@ -28,7 +29,7 @@ const upload = multer({
 
 router.post('/', authenticate, authorize('admin'), setCommunity, sanitize('title', 'message'),
   logAudit('CREATE_ANNOUNCEMENT', (req) => ({ title: req.body.title })),
-  upload.single('file'), announcementController.create);
+  upload.single('file'), trackUploadedFile, announcementController.create);
 router.get('/admin', authenticate, authorize('admin'), setCommunity, announcementController.listForAdmin);
 router.get('/', authenticate, authorize('admin', 'residente'), setCommunity, announcementController.listForResident);
 router.put('/:id/read', authenticate, authorize('admin', 'residente'), setCommunity, announcementController.markAsRead);

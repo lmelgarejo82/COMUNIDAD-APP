@@ -1,4 +1,6 @@
 const { MasterTicket } = require('../models/MasterTicket');
+const { UploadAccess } = require('../models/UploadAccess');
+const { canonicalStoredUploadUrl } = require('../services/uploadFiles');
 const { invalidatePattern } = require('../cache');
 
 function buildAffectedUnits(scope) {
@@ -23,6 +25,23 @@ function formatDescription(description, severity, estimated_resolution) {
   return desc.trim() || null;
 }
 
+async function validateFileReference(fileUrl, req) {
+  if (fileUrl === undefined) return { valid: true, value: undefined };
+  if (fileUrl === null || fileUrl === '') return { valid: true, value: null };
+
+  const canonical = canonicalStoredUploadUrl(fileUrl);
+  if (!canonical) return { valid: false };
+
+  const authorized = await UploadAccess.isAuthorized(canonical, {
+    communityId: req.communityId,
+    userId: req.user.id,
+    role: req.user.role,
+  });
+  return authorized
+    ? { valid: true, value: canonical }
+    : { valid: false };
+}
+
 exports.create = async (req, res) => {
   try {
     const { title, description, category, severity, file_url, scope } = req.body;
@@ -34,12 +53,15 @@ exports.create = async (req, res) => {
       return res.status(400).json({ error: 'scope debe contener al menos una unidad, piso o edificio' });
     }
 
+    const fileReference = await validateFileReference(file_url, req);
+    if (!fileReference.valid) return res.status(404).json({ error: 'Archivo no encontrado' });
+
     const master = await MasterTicket.createMasterTicket({
       community_id: req.communityId,
       title,
       description: formatDescription(description, severity, req.body.estimated_resolution),
       type: category || 'general',
-      file_url: file_url || null,
+      file_url: fileReference.value || null,
       created_by: req.user.id,
     }, affectedUnits);
 
@@ -90,6 +112,9 @@ exports.update = async (req, res) => {
     const existing = await MasterTicket.getMasterTicket(id, req.communityId);
     if (!existing) return res.status(404).json({ error: 'Master ticket no encontrado' });
 
+    const fileReference = await validateFileReference(file_url, req);
+    if (!fileReference.valid) return res.status(404).json({ error: 'Archivo no encontrado' });
+
     const updated = await MasterTicket.updateMasterTicket(id, req.communityId, {
       title,
       description: description !== undefined
@@ -97,7 +122,7 @@ exports.update = async (req, res) => {
         : undefined,
       type: category,
       status,
-      file_url,
+      file_url: fileReference.value,
     });
 
     res.json(updated);

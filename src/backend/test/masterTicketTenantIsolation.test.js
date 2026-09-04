@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const controllerPath = require.resolve('../controllers/masterTicketController');
 const masterTicketPath = require.resolve('../models/MasterTicket');
+const uploadAccessPath = require.resolve('../models/UploadAccess');
 const cachePath = require.resolve('../cache');
 
 function mockModule(path, exports) {
@@ -14,9 +15,10 @@ function mockModule(path, exports) {
   };
 }
 
-function loadController(masterTicketImpl) {
+function loadController(masterTicketImpl, uploadAccessImpl = { isAuthorized: async () => true }) {
   delete require.cache[controllerPath];
   mockModule(masterTicketPath, { MasterTicket: masterTicketImpl });
+  mockModule(uploadAccessPath, { UploadAccess: uploadAccessImpl });
   mockModule(cachePath, { invalidatePattern: async () => {} });
   return require('../controllers/masterTicketController');
 }
@@ -90,6 +92,94 @@ test('master ticket creation rejects a foreign related ID without queueing', asy
   assert.equal(res.statusCode, 403);
   assert.deepEqual(res.body, { error: 'El alcance no pertenece a tu comunidad' });
   assert.equal(enqueued, false);
+});
+
+test('master ticket creation rejects a client-supplied file without a trusted local association', async () => {
+  let created = false;
+  let checked = null;
+  const { create } = loadController({
+    async createMasterTicket() {
+      created = true;
+    },
+  }, {
+    async isAuthorized(fileUrl, context) {
+      checked = { fileUrl, context };
+      return false;
+    },
+  });
+  const res = createResponse();
+
+  await create({
+    communityId: 7,
+    user: { id: 5, role: 'admin' },
+    body: {
+      title: 'Alias extranjero',
+      file_url: '/uploads/foreign.pdf',
+      scope: { unit_ids: [1] },
+    },
+  }, res);
+
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(res.body, { error: 'Archivo no encontrado' });
+  assert.equal(created, false);
+  assert.deepEqual(checked, {
+    fileUrl: '/uploads/foreign.pdf',
+    context: { communityId: 7, userId: 5, role: 'admin' },
+  });
+});
+
+test('master ticket creation preserves a canonical trusted local attachment', async () => {
+  let received = null;
+  const { create } = loadController({
+    async createMasterTicket(data) {
+      received = data;
+      return { id: 40, ...data };
+    },
+    async enqueueSubTicketGeneration() {
+      return { enqueued: false, jobId: null };
+    },
+  });
+  const res = createResponse();
+
+  await create({
+    communityId: 7,
+    user: { id: 5, role: 'admin' },
+    body: {
+      title: 'Adjunto local',
+      file_url: '/uploads/local.pdf',
+      scope: { unit_ids: [1] },
+    },
+  }, res);
+
+  assert.equal(res.statusCode, 202);
+  assert.equal(received.file_url, '/uploads/local.pdf');
+});
+
+test('master ticket update rejects an untrusted file alias before mutation', async () => {
+  let updated = false;
+  const { update } = loadController({
+    async getMasterTicket() {
+      return { id: 52, community_id: 7, title: 'Local' };
+    },
+    async updateMasterTicket() {
+      updated = true;
+    },
+  }, {
+    async isAuthorized() {
+      return false;
+    },
+  });
+  const res = createResponse();
+
+  await update({
+    params: { id: '52' },
+    communityId: 7,
+    user: { id: 5, role: 'admin' },
+    body: { file_url: '/uploads/foreign.pdf' },
+  }, res);
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(updated, false);
 });
 
 test('master ticket detail allows a resource from req.communityId', async () => {

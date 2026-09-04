@@ -28,6 +28,7 @@ exports.create = async (req, res) => {
       location_label: location_label?.trim() || null,
       file_url,
     });
+    req.retainUploadedFile?.();
     const admins = await require('../db').pool.query("SELECT id FROM users WHERE community_id = $1 AND role = 'admin'", [req.communityId]);
     for (const admin of admins.rows) {
       await Notification.create({ user_id: admin.id, type: 'ticket_new', title: 'Nuevo ticket', message: `${user.unit_number}: ${title}`, reference_id: ticket.id });
@@ -130,6 +131,7 @@ exports.addReply = async (req, res) => {
       file_url,
       is_admin: isAdmin,
     });
+    req.retainUploadedFile?.();
 
     if (isAdmin && ticket.user_id !== req.user.id) {
       await Notification.create({

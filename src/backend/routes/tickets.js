@@ -8,6 +8,7 @@ const { authorize } = require('../middleware/authorize');
 const { sanitize } = require('../middleware/sanitize');
 const { setCommunity } = require('../middleware/setCommunity');
 const { logAudit } = require('../middleware/logAudit');
+const { trackUploadedFile } = require('../middleware/uploadLifecycle');
 
 const storage = multer.diskStorage({
   destination: path.join(__dirname, '..', 'uploads'),
@@ -26,13 +27,13 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
-router.post('/', authenticate, authorize('residente'), setCommunity, sanitize('title', 'description'), upload.single('file'), ticketController.create);
+router.post('/', authenticate, authorize('residente'), setCommunity, sanitize('title', 'description'), upload.single('file'), trackUploadedFile, ticketController.create);
 router.get('/', authenticate, authorize('admin'), setCommunity, ticketController.listAll);
 router.get('/my', authenticate, authorize('residente'), setCommunity, ticketController.listMy);
 router.put('/:id/status', authenticate, authorize('admin'), setCommunity,
   logAudit('UPDATE_TICKET_STATUS', (req) => ({ ticketId: req.params.id, status: req.body.status })),
   ticketController.updateStatus);
 router.put('/:id', authenticate, authorize('admin', 'residente'), setCommunity, sanitize('title', 'description'), ticketController.update);
-router.post('/:id/reply', authenticate, authorize('admin', 'residente'), setCommunity, sanitize('message'), upload.single('file'), ticketController.addReply);
+router.post('/:id/reply', authenticate, authorize('admin', 'residente'), setCommunity, sanitize('message'), upload.single('file'), trackUploadedFile, ticketController.addReply);
 
 module.exports = router;

@@ -91,14 +91,27 @@ test('uploads authentication rejects revoked sessions and accepts current ones',
   const stale = loadAuthMiddleware(uploadsAuthPath, false).uploadsAuth;
   const staleRes = response();
   let staleNext = false;
-  await stale({ query: { token: 'signed-token' }, headers: {} }, staleRes, () => { staleNext = true; });
+  await stale({ query: {}, headers: { authorization: 'Bearer signed-token' } }, staleRes, () => { staleNext = true; });
   assert.equal(staleRes.statusCode, 401);
   assert.equal(staleNext, false);
 
   const current = loadAuthMiddleware(uploadsAuthPath, true).uploadsAuth;
   const currentRes = response();
   let currentNext = false;
-  await current({ query: {}, headers: { authorization: 'Bearer signed-token' } }, currentRes, () => { currentNext = true; });
+  const currentReq = { query: {}, headers: { authorization: 'Bearer signed-token' } };
+  await current(currentReq, currentRes, () => { currentNext = true; });
   assert.equal(currentRes.statusCode, 200);
   assert.equal(currentNext, true);
+  assert.deepEqual(currentReq.user, { id: 7, auth_version: 0 });
+});
+
+test('uploads authentication rejects JWTs supplied through the query string', async () => {
+  const { uploadsAuth } = loadAuthMiddleware(uploadsAuthPath, true);
+  const res = response();
+  let nextCalled = false;
+
+  await uploadsAuth({ query: { token: 'signed-token' }, headers: {} }, res, () => { nextCalled = true; });
+
+  assert.equal(res.statusCode, 401);
+  assert.equal(nextCalled, false);
 });

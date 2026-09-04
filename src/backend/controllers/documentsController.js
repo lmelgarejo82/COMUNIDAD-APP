@@ -14,6 +14,7 @@ exports.upload = async (req, res) => {
       file_url,
       uploaded_by: req.user.id,
     });
+    req.retainUploadedFile?.();
     res.status(201).json(doc);
   } catch (err) {
     console.error('Error en upload document:', err);

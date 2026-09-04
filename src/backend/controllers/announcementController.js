@@ -9,6 +9,7 @@ exports.create = async (req, res) => {
     let file_url = null;
     if (req.file) file_url = `/uploads/${req.file.filename}`;
     const announcement = await Announcement.create({ community_id: req.communityId, title, message, file_url, created_by: req.user.id });
+    req.retainUploadedFile?.();
     await Notification.createForCommunity(req.communityId, {
       type: 'announcement', title: 'Nuevo anuncio', message: title,
       reference_id: announcement.id, excludeUserId: req.user.id,
