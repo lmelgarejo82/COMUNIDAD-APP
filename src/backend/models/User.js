@@ -53,6 +53,14 @@ const User = {
     return rows[0];
   },
 
+  async getAuthVersion(id, client = null) {
+    const { rows } = await getQuery(client).query(
+      'SELECT auth_version FROM users WHERE id = $1',
+      [id]
+    );
+    return rows[0] ? rows[0].auth_version : null;
+  },
+
   async hasActiveOwnership(userId, communityId, ownershipType, client = null) {
     const { rows } = await getQuery(client).query(
       `SELECT 1
@@ -78,28 +86,44 @@ const User = {
     return Boolean(rows[0]);
   },
 
-  async setResetToken(email, token, expires) {
-    const { rowCount } = await pool.query(
-      'UPDATE users SET reset_token = $2, reset_token_expires = $3 WHERE email = $1',
-      [email, token, expires]
+  async setResetToken(email, tokenHash, expires) {
+    const { rows } = await pool.query(
+      `UPDATE users
+       SET reset_token_hash = $2, reset_token_expires = $3
+       WHERE email = $1
+       RETURNING id, email`,
+      [email, tokenHash, expires]
     );
-    return rowCount > 0;
+    return rows[0] || null;
   },
 
-  async findByResetToken(token) {
+  async consumeResetToken(tokenHash, passwordHash) {
     const { rows } = await pool.query(
-      'SELECT * FROM users WHERE reset_token = $1 AND reset_token_expires > NOW()',
-      [token]
+      `UPDATE users
+       SET password_hash = $2,
+           reset_token_hash = NULL,
+           reset_token_expires = NULL,
+           auth_version = auth_version + 1
+       WHERE reset_token_hash = $1
+         AND reset_token_expires > NOW()
+       RETURNING id, auth_version`,
+      [tokenHash, passwordHash]
     );
     return rows[0] || null;
   },
 
   async updatePassword(id, password_hash) {
-    const { rowCount } = await pool.query(
-      'UPDATE users SET password_hash = $2, reset_token = NULL, reset_token_expires = NULL WHERE id = $1',
+    const { rows } = await pool.query(
+      `UPDATE users
+       SET password_hash = $2,
+           reset_token_hash = NULL,
+           reset_token_expires = NULL,
+           auth_version = auth_version + 1
+       WHERE id = $1
+       RETURNING auth_version`,
       [id, password_hash]
     );
-    return rowCount > 0;
+    return rows[0] || null;
   },
 
   async updateProfile(id, { email }) {

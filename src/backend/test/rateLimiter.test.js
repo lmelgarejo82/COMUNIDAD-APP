@@ -73,6 +73,27 @@ test('auth limiter keeps failed login attempts rate limited with structured 429 
   }
 });
 
+test('password recovery limiter counts generic successful responses equally', async () => {
+  const { limiters, restore } = loadRateLimiters({ AUTH_RATE_LIMIT_MAX: '2' });
+  const app = express();
+  app.use(express.json());
+  app.post('/api/auth/forgot-password', limiters.passwordRecoveryLimiter, (req, res) => {
+    res.json({ message: 'generic' });
+  });
+
+  const server = await listen(app);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    assert.equal((await fetch(`${baseUrl}/api/auth/forgot-password`, { method: 'POST' })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/api/auth/forgot-password`, { method: 'POST' })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/api/auth/forgot-password`, { method: 'POST' })).status, 429);
+  } finally {
+    await close(server);
+    restore();
+  }
+});
+
 test('global API limiter allows reasonable authenticated navigation bursts', async () => {
   const { limiters, restore } = loadRateLimiters({ RATE_LIMIT_MAX: '5' });
   const app = express();

@@ -93,9 +93,19 @@ const authLimiter = rateLimit({
   store: createStore('auth'),
 });
 
+const passwordRecoveryLimiter = rateLimit({
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  max: AUTH_RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: createRateLimitHandler('Demasiados intentos. Esperá unos minutos antes de volver a intentar.'),
+  store: createStore('password-recovery'),
+});
+
 module.exports = {
   globalLimiter,
   authLimiter,
+  passwordRecoveryLimiter,
   createRateLimitHandler,
   config: {
     windowMs: RATE_LIMIT_WINDOW_MS,

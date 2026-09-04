@@ -16,9 +16,44 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+const GENERIC_RESET_MESSAGE = 'Si el email existe, recibirás un enlace de restablecimiento';
+
+function hashResetToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function scheduleResetEmail({ userId, email, resetUrl }) {
+  setImmediate(async () => {
+    try {
+      await transporter.sendMail({
+        from: '"Comunidad App" <noreply@comunidad.app>',
+        to: email,
+        subject: 'Restablecer contraseña',
+        html: `
+          <h2>Restablecimiento de contraseña</h2>
+          <p>Hacé clic en el siguiente enlace para restablecer tu contraseña:</p>
+          <a href="${resetUrl}">${resetUrl}</a>
+          <p>Este enlace expira en 1 hora.</p>
+          <p>Si no solicitaste este cambio, ignorá este mensaje.</p>
+        `,
+      });
+    } catch (emailError) {
+      console.error('Falló la entrega de recuperación de contraseña:', {
+        user_id: userId,
+        error: emailError.message,
+      });
+    }
+  });
+}
+
 function generateToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      auth_version: Number.isInteger(user.auth_version) ? user.auth_version : 0,
+    },
     getJwtSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
@@ -168,7 +203,7 @@ exports.login = async (req, res) => {
     }
 
     const safeUser = await User.findById(user.id);
-    const token = generateToken(safeUser || user);
+    const token = generateToken({ ...(safeUser || user), auth_version: user.auth_version });
     res.json({ user: safeUser, token });
   } catch (err) {
     console.error('Error en login:', err);
@@ -184,36 +219,22 @@ exports.forgotPassword = async (req, res) => {
       return res.status(400).json({ error: 'Email es requerido' });
     }
 
-    const user = await User.findByEmail(email);
-    if (!user) {
-      return res.json({ message: 'Si el email existe, recibirás un enlace de restablecimiento' });
-    }
-
     const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenHash = hashResetToken(resetToken);
     const resetTokenExpires = new Date(Date.now() + 3600000); // 1 hora
 
-    await User.setResetToken(email, resetToken, resetTokenExpires);
+    const user = await User.setResetToken(email, resetTokenHash, resetTokenExpires);
+    if (!user) {
+      return res.json({ message: GENERIC_RESET_MESSAGE });
+    }
 
     const resetUrl = new URL(
       `/api/auth/reset-password/${encodeURIComponent(resetToken)}`,
       `${getPublicAppOrigin()}/`
     ).toString();
 
-    const info = await transporter.sendMail({
-      from: '"Comunidad App" <noreply@comunidad.app>',
-      to: email,
-      subject: 'Restablecer contraseña',
-      html: `
-        <h2>Restablecimiento de contraseña</h2>
-        <p>Hacé clic en el siguiente enlace para restablecer tu contraseña:</p>
-        <a href="${resetUrl}">${resetUrl}</a>
-        <p>Este enlace expira en 1 hora.</p>
-        <p>Si no solicitaste este cambio, ignorá este mensaje.</p>
-      `,
-    });
-
-    console.log('Email enviado:', nodemailer.getTestMessageUrl(info));
-    res.json({ message: 'Si el email existe, recibirás un enlace de restablecimiento' });
+    res.json({ message: GENERIC_RESET_MESSAGE });
+    scheduleResetEmail({ userId: user.id, email, resetUrl });
   } catch (err) {
     console.error('Error en forgotPassword:', err);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -229,13 +250,11 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     }
 
-    const user = await User.findByResetToken(token);
-    if (!user) {
+    const password_hash = await bcrypt.hash(password, 10);
+    const consumed = await User.consumeResetToken(hashResetToken(token), password_hash);
+    if (!consumed) {
       return res.status(400).json({ error: 'Token inválido o expirado' });
     }
-
-    const password_hash = await bcrypt.hash(password, 10);
-    await User.updatePassword(user.id, password_hash);
 
     res.json({ message: 'Contraseña actualizada correctamente' });
   } catch (err) {

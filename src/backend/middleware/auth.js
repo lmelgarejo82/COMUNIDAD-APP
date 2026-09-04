@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { getJwtSecret } = require('../config/security');
+const { isSessionCurrent } = require('./sessionVersion');
 
-function authenticate(req, res, next) {
+async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -12,6 +13,9 @@ function authenticate(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, getJwtSecret());
+    if (!(await isSessionCurrent(decoded))) {
+      return res.status(401).json({ error: 'Token inválido o expirado' });
+    }
     req.user = decoded;
     next();
   } catch (err) {

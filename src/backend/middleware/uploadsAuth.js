@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { getJwtSecret } = require('../config/security');
+const { isSessionCurrent } = require('./sessionVersion');
 
-function uploadsAuth(req, res, next) {
+async function uploadsAuth(req, res, next) {
   const token = req.query.token || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
 
   if (!token) {
@@ -9,7 +10,10 @@ function uploadsAuth(req, res, next) {
   }
 
   try {
-    jwt.verify(token, getJwtSecret());
+    const decoded = jwt.verify(token, getJwtSecret());
+    if (!(await isSessionCurrent(decoded))) {
+      return res.status(401).json({ error: 'Token inválido o expirado' });
+    }
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido o expirado' });
