@@ -31,13 +31,18 @@ export default function Layout() {
   const isAdmin = user?.role === 'admin';
   const isAccessOperator = user?.role === 'access_operator';
   const isMobile = width < 640;
-  const showFloatingSupport = width >= 768 && !menuOpen && !notifOpen;
+  const showFloatingSupport = width >= 768 && !isAccessOperator && !menuOpen && !notifOpen;
 
   useEffect(() => {
+    if (isAccessOperator) {
+      setUnreadCount(0);
+      setNotifications([]);
+      return undefined;
+    }
     fetchCount();
     const interval = setInterval(fetchCount, 30000);
     return () => clearInterval(interval);
-  }, [isAdmin, selectedId]);
+  }, [isAdmin, isAccessOperator, selectedId]);
 
   useEffect(() => {
     if (isAdmin) fetchComplexes();
@@ -128,10 +133,12 @@ export default function Layout() {
         )}
 
         <div style={styles.user}>
-          <div style={styles.notifWrap} onClick={toggleNotifications}>
-            <span style={styles.bell}>&#128276;</span>
-            {unreadCount > 0 && <span style={styles.badge}>{unreadCount > 9 ? '9+' : unreadCount}</span>}
-          </div>
+          {!isAccessOperator && (
+            <div style={styles.notifWrap} onClick={toggleNotifications}>
+              <span style={styles.bell}>&#128276;</span>
+              {unreadCount > 0 && <span style={styles.badge}>{unreadCount > 9 ? '9+' : unreadCount}</span>}
+            </div>
+          )}
           {!isMobile && (
             <>
               <strong>{user?.email}</strong>
