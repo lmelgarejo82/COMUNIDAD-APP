@@ -6,10 +6,10 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 
-const { globalLimiter } = require('./middleware/rateLimiter');
+const { initializeRateLimiters } = require('./middleware/rateLimiter');
 const uploadsRoutes = require('./routes/uploads');
 
-const authRoutes = require('./routes/auth');
+const createAuthRoutes = require('./routes/auth');
 const dashboardRoutes = require('./routes/dashboard');
 const expenseRoutes = require('./routes/expenses');
 const hierarchyRoutes = require('./routes/hierarchy');
@@ -36,41 +36,50 @@ const { init: initMasterTicketQueue } = require('./jobs/masterTicketQueue');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.set('trust proxy', securityConfig.trustProxy);
-app.use(helmet());
-app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+async function startServer() {
+  const limiters = await initializeRateLimiters();
 
-app.use('/uploads', uploadsRoutes);
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
-app.use('/api', globalLimiter);
+  app.set('trust proxy', securityConfig.trustProxy);
+  app.use(helmet());
+  app.use(cors());
+  app.use(express.json({ limit: '1mb' }));
 
-app.use('/api/auth', authRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/expenses', expenseRoutes);
-app.use('/api/hierarchy', hierarchyRoutes);
-app.use('/api/master-tickets', masterTicketsRoutes);
-app.use('/api/announcements', announcementRoutes);
-app.use('/api/tickets', ticketRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/reports', reportsRoutes);
-app.use('/api/payments', paymentsRoutes);
-app.use('/api/webhooks', webhooksRoutes);
-app.use('/api/bookings', bookingsRoutes);
-app.use('/api/chat', chatRoutes);
-app.use('/api/polls', pollsRoutes);
-app.use('/api/documents', documentsRoutes);
-app.use('/api/access-logs', accessLogRoutes);
-app.use('/api/access-invitations', accessInvitationRoutes);
-app.use('/api/access-preauthorizations', accessPreauthorizationRoutes);
-app.use('/api', phoneRoutes);
+  app.use('/uploads', uploadsRoutes);
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+  app.use('/api', limiters.globalLimiter);
 
-app.listen(PORT, () => {
-  console.log(`Backend corriendo en http://localhost:${PORT}`);
-  startReminders();
-  initMasterTicketQueue();
+  app.use('/api/auth', createAuthRoutes(limiters));
+  app.use('/api/dashboard', dashboardRoutes);
+  app.use('/api/expenses', expenseRoutes);
+  app.use('/api/hierarchy', hierarchyRoutes);
+  app.use('/api/master-tickets', masterTicketsRoutes);
+  app.use('/api/announcements', announcementRoutes);
+  app.use('/api/tickets', ticketRoutes);
+  app.use('/api/notifications', notificationRoutes);
+  app.use('/api/users', userRoutes);
+  app.use('/api/admin', adminRoutes);
+  app.use('/api/reports', reportsRoutes);
+  app.use('/api/payments', paymentsRoutes);
+  app.use('/api/webhooks', webhooksRoutes);
+  app.use('/api/bookings', bookingsRoutes);
+  app.use('/api/chat', chatRoutes);
+  app.use('/api/polls', pollsRoutes);
+  app.use('/api/documents', documentsRoutes);
+  app.use('/api/access-logs', accessLogRoutes);
+  app.use('/api/access-invitations', accessInvitationRoutes);
+  app.use('/api/access-preauthorizations', accessPreauthorizationRoutes);
+  app.use('/api', phoneRoutes);
+
+  app.listen(PORT, () => {
+    console.log(`Backend corriendo en http://localhost:${PORT}`);
+    startReminders();
+    initMasterTicketQueue();
+  });
+}
+
+startServer().catch((error) => {
+  console.error('Error iniciando backend:', error.message);
+  process.exitCode = 1;
 });
