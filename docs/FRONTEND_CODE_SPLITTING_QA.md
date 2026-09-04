@@ -1,5 +1,106 @@
 # QA post code splitting frontend
 
+## Cierre live Bloque 34B
+
+Fecha de ejecucion: 2026-09-04.
+
+Esta seccion completa en Docker real los puntos que habian quedado pendientes en la reejecucion anterior. El antecedente del error de permisos se conserva debajo.
+
+### VALIDADO
+
+Entorno y Docker:
+
+- Estado Git inicial: `main`, HEAD `7291905b43610a30e6e531270a962552386edeeb`, `ahead 3`, worktree limpio.
+- `docker version` y `docker info` comunicaron correctamente con Docker Desktop `4.89.0`, engine `29.7.2` y contexto activo `desktop-linux`.
+- El usuario Windows no pertenece a `docker-users`, pero el engine WSL2 actual fue accesible sin elevacion ni cambios del host.
+- El `permission denied` de la ejecucion anterior no fue reproducible. No se cambio contexto, grupo, servicio ni configuracion del proyecto.
+- `docker compose up -d --build` completo correctamente.
+- PostgreSQL y Redis quedaron `healthy`; backend y frontend quedaron running en `3000` y `8080`.
+- Las 27 migraciones existentes fueron reconocidas y omitidas por ya estar aplicadas.
+- Redis conecto correctamente para rate limiting y cache despues del arranque.
+
+Health y rate limiting:
+
+- `GET http://localhost:3000/api/health` respondio `200`, `{"status":"ok"}`.
+- Una serie de 30 solicitudes de health devolvio `30/30` respuestas `200`.
+- Una rafaga de 25 solicitudes autenticadas a `/api/dashboard/admin` devolvio `25/25` respuestas `200`, sin `401`, `403`, `429` ni `500`.
+- Tres vueltas de navegacion admin mantuvieron cantidades estables de requests: 4 por dashboard, tickets, accesos y documentos; 5 por estructura y amenities. No hubo crecimiento entre rondas.
+
+Admin live:
+
+- Login real exitoso como `admin1@comunidad.app`.
+- `/dashboard` -> Dashboard visible, APIs `200`, sin fallback ni pantalla blanca.
+- `/expensas` -> Expensas visible, chunk independiente cargado, sin errores.
+- `/anuncios` -> Anuncios visible, chunk independiente cargado, sin errores.
+- `/tickets` -> Tickets visible, chunk independiente cargado, sin errores.
+- `/accesos` -> Accesos visible, chunks de AccessLogs y hierarchy cargados, sin errores.
+- `/invite` -> Invitar residente visible, chunk independiente cargado, sin errores.
+- `/estructura` -> Estructura visible, chunk independiente cargado, sin errores.
+- `/audit` -> Historial visible, chunk independiente cargado, sin errores.
+- `/amenities` -> Reservas de Amenities visible, chunk independiente cargado, sin errores.
+- `/documents` -> Documentacion Legal visible, chunk independiente cargado, sin errores.
+- `/admin/estructura` y `/unidades` redirigieron a `/estructura` con contenido visible.
+- Hard refresh autenticado exitoso en `/tickets`, `/accesos`, `/estructura`, `/amenities` y `/documents`; la sesion se conservo y cada chunk volvio a resolver sin 404.
+- Se completaron tres rondas `dashboard -> tickets -> accesos -> estructura -> amenities -> documents -> dashboard` sin 429, perdida de sesion, fallback colgado, pantalla blanca ni crecimiento de requests.
+
+Residente live:
+
+- Login real exitoso como `vecino11@comunidad.app`.
+- `/dashboard`, `/expensas`, `/anuncios`, `/tickets`, `/amenities` y `/documents` cargaron contenido y sus chunks sin errores.
+- Refresh autenticado de `/tickets` con sesion conservada.
+- `/estructura`, `/accesos`, `/audit` e `/invite` redirigieron a `/dashboard`.
+- Backend real respondio `403` para `/api/access-logs`, `/api/hierarchy/admin/complexes`, `/api/admin/audit` y `POST /api/admin/invite`.
+- Logout y posterior intento de abrir `/tickets` terminaron en `/login`.
+
+Guardia live:
+
+- Login real exitoso como `guardia1@comunidad.app`, rol `access_operator`.
+- `/accesos` cargo contenido y `GET /api/access-logs` respondio `200`.
+- Refresh autenticado de `/accesos` con sesion conservada.
+- `/tickets` redirigio a `/accesos`.
+- `GET /api/tickets` respondio `403` en backend real.
+- Logout y posterior intento de abrir `/accesos` terminaron en `/login`.
+
+Lazy chunks y QR:
+
+- Network mostro el entry inicial y chunks separados para las nueve rutas lazy; no reaparecio un bundle monolitico.
+- No hubo `Failed to fetch dynamically imported module`, `ChunkLoadError` ni requests de chunks fallidas.
+- Una navegacion SPA real `dashboard -> tickets` mediante el enlace del menu tambien termino correctamente en `/tickets`.
+- Se creo la preautorizacion temporal `QA QR lazy 20260904`, se genero su invitacion y el POST respondio `201`.
+- El chunk QR `browser-C80QGymg.js` respondio `200` y se renderizo una imagen `data:image/png;base64` visible.
+- La invitacion QA fue revocada y la preautorizacion cancelada al finalizar, ambas con respuesta `200`; no quedo un acceso QA activo.
+
+Correccion de regresion encontrada:
+
+- Sintoma: guardia recibia `403` en `/api/admin/phone` y `/api/notifications/count`; notifications repetia el request cada 30 segundos.
+- Causa raiz: `Layout` montaba notificaciones, `WhatsAppButton` y soporte flotante para `access_operator`, aunque esos endpoints admiten solo admin/residente.
+- Impacto: ruido de Network y polling fallido recurrente, sin escalacion de permisos ni bloqueo de Accesos.
+- Cambio minimo: `Layout.jsx` no inicia polling, no muestra campana y no monta soporte flotante para `access_operator`. No se cambiaron permisos backend ni rate limits.
+- Regresion live: durante mas de 30 segundos en `/accesos`, guardia realizo solo login y access logs, ambos `200`; no hubo phone, notifications, `403`, `429`, fallos ni widget de soporte.
+- Sanity admin: phone y notifications conservaron respuestas `200` y el soporte siguio visible.
+
+Tests y build posteriores al cambio:
+
+- `npm test`: `99` tests, `99` passed, `0` failed, `0` skipped; duracion Node `1935.3869 ms`.
+- `npm run build`: exitoso, `614` modulos, `3.65 s`.
+- Entry final: `index-gzu90JZi.js`, `323.34 kB`, gzip `104.75 kB`.
+- Mayor chunk: `Amenities-C4FHB88t.js`, `253.73 kB`, gzip `80.19 kB`.
+- QR final: `browser-Bju_xTfx.js`, `25.78 kB`, gzip `10.13 kB`.
+- Sin warning Vite por chunk mayor a `500 kB`.
+- Docker fue reconstruido despues del cambio y los cuatro servicios continuaron operativos.
+
+### NO VALIDADO
+
+- Lectura fisica de QR con camara/`BarcodeDetector`, explicitamente fuera del alcance de este bloque.
+- No quedan validaciones live obligatorias pendientes para el cierre post-code-splitting.
+
+### OBSERVACIONES
+
+- En pestañas de automatizacion reutilizadas intensivamente, el controlador de navegador dejo de activar algunos clicks semanticos. Los mismos botones funcionaron en pestañas limpias; las rutas se verificaron ademas por URL directa, refresh y una navegacion SPA por teclado.
+- El build Docker informo paquetes npm deprecados y vulnerabilidades de auditoria ya existentes: frontend `5 high`; backend `6 moderate` y `2 high`. No se ejecuto `npm audit fix` porque dependencias y upgrades estan fuera de alcance.
+- Los `401` posteriores a logout y los `403` de pruebas negativas de permisos fueron esperados. No se observaron otros errores de consola o Network.
+- Decision: `GO`. El QA live post-code-splitting queda cerrado; la regresion de requests globales del guardia fue corregida y revalidada.
+
 ## Reejecucion Bloque 34 posterior al ajuste de rate limiting
 
 Fecha de ejecucion: 2026-09-04.
