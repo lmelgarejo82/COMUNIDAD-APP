@@ -1,5 +1,89 @@
 # QA post code splitting frontend
 
+## Reejecucion Bloque 34 posterior al ajuste de rate limiting
+
+Fecha de ejecucion: 2026-09-04.
+
+Esta seccion registra la reejecucion posterior a `c91316d fix: tune rate limiting for authenticated app` y prevalece como estado de cierre sobre el QA inicial conservado mas abajo como antecedente historico.
+
+### VALIDADO
+
+Estado Git inicial:
+
+- Rama: `main`.
+- HEAD: `c91316d7a07cd1b10252a26c4354452b2c61b3f1`.
+- Tracking: `main...origin/main [ahead 2]`.
+- Worktree inicial: limpio.
+- Origin: `https://github.com/lmelgarejo82/COMUNIDAD-APP.git`.
+
+Diagnostico de code splitting:
+
+- Son lazy las rutas `/expensas`, `/anuncios`, `/tickets`, `/invite`, `/audit`, `/amenities`, `/documents`, `/estructura` y `/accesos`.
+- `ChatWidget` se carga con `React.lazy` y `Suspense` con fallback nulo.
+- Las rutas lazy usan el fallback visible `Cargando modulo...`.
+- `qrcode` continua importandose dinamicamente solo cuando existe `generated.invitation_url`.
+- No existen otros `import()` en `src/frontend/src`.
+- El layout completo esta envuelto por `ProtectedRoute` y cada ruta conserva su filtro de roles.
+- `/admin/estructura` y `/unidades` conservan la redireccion a `/estructura`.
+
+Diagnostico de rate limiting:
+
+- `/api/health` se registra antes de `app.use('/api', globalLimiter)` y queda fuera del limiter global.
+- Ventana, limite global y limite auth son configurables mediante `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX` y `AUTH_RATE_LIMIT_MAX`.
+- Defaults en produccion sin variables: 15 minutos, global `300`, auth `5`.
+- Defaults en desarrollo y Docker: 15 minutos, global `1000`, auth `20`.
+- `authLimiter` esta separado y se aplica a registro, login y recuperacion de password.
+- `authLimiter` usa `skipSuccessfulRequests: true`.
+- La respuesta `429` incluye `message`, `error`, `retryAfter` y header `Retry-After`.
+- En `NODE_ENV=test` no se crea cliente Redis; los tests usan memoria y no dependen de Redis externo.
+
+Tests backend:
+
+- Comando: `npm test` desde `src/backend`.
+- Resultado: `99` tests, `99` passed, `0` failed, `0` skipped, `0` cancelled.
+- Duracion informada por Node: `1392.896 ms`.
+- Warnings relevantes: ninguno. Los mensajes de cola deshabilitada son informativos y esperados en tests.
+
+Build frontend:
+
+- Comando: `npm run build` desde `src/frontend`.
+- Resultado: exitoso, `614` modulos transformados, build Vite en `3.50 s`.
+- Entry: `index-DQW8m1Bg.js`, `323.30 kB`, gzip `104.74 kB`.
+- Mayor chunk de ruta: `Amenities-C6p1URnn.js`, `253.73 kB`, gzip `80.19 kB`.
+- No aparecio warning de Vite por chunks mayores a `500 kB`.
+- Se generaron chunks independientes para las nueve rutas lazy, `ChatWidget` y el modulo `browser` asociado a QR.
+
+Validacion aislada del artefacto frontend:
+
+- Se sirvio temporalmente `dist` con `vite preview` en `http://127.0.0.1:4173` porque Docker no estaba accesible.
+- `/login` renderizo el formulario completo en Chrome sin errores ni warnings de consola.
+- Cargas directas de `/dashboard`, `/expensas`, `/anuncios`, `/tickets`, `/accesos`, `/invite`, `/estructura`, `/audit`, `/amenities`, `/documents`, `/admin/estructura` y `/unidades` respondieron HTTP `200` desde el servidor SPA.
+- Sin sesion, todas esas rutas terminaron correctamente en `/login` con contenido visible y sin pantalla blanca.
+- `git diff --check` no informo errores antes de editar este documento.
+
+### NO VALIDADO
+
+- `docker compose up -d --build` y `docker compose ps`: el cliente Docker recibio `permission denied` al abrir tanto `npipe:////./pipe/dockerDesktopLinuxEngine` como `npipe:////./pipe/docker_engine`.
+- Estado live de `db`, `redis`, `backend` y `frontend`: no verificable en esta ejecucion.
+- `GET http://localhost:3000/api/health`: sin servicio escuchando; no se pudo comprobar el `200` live ni repetirlo contra Docker.
+- `http://localhost:8080/login`: `ERR_CONNECTION_REFUSED` en Chrome y sin servicio escuchando desde host.
+- Login real, navegacion autenticada, refresh directo autenticado, logout y sesion para admin, residente y guardia.
+- Consola y Network durante rutas lazy autenticadas.
+- Carga bajo demanda de cada chunk al ingresar por primera vez y regreso a una ruta ya cacheada.
+- Flujo real de generacion/render de QR posterior al code splitting.
+- Rafaga aproximada de 25 requests autenticadas al dashboard bajo el perfil Docker.
+- Permisos live por backend para las capacidades administrativas de residente y Tickets de guardia. La cobertura automatizada de backend si paso, pero no sustituye la verificacion live solicitada.
+
+### OBSERVACIONES
+
+- No se detectaron regresiones en inspeccion de codigo, tests backend, build ni proteccion sin sesion del artefacto frontend.
+- La correccion del falso `429` tiene cobertura automatizada y configuracion coherente, pero su resultado live bajo navegacion normal queda pendiente por la indisponibilidad del daemon Docker.
+- El fallo Docker ocurre antes de construir o iniciar servicios y no aporta evidencia de una falla del repositorio.
+- `Amenities` sigue siendo el chunk lazy mas grande; su tamano permanece dentro del baseline esperado y no justifica otra optimizacion en este bloque.
+- Recomendacion de esta reejecucion: `NO-GO` para declarar el cierre QA definitivo hasta repetir Docker, health y los recorridos autenticados. No se encontro un bug funcional que requiera correccion de codigo.
+
+## Ejecucion inicial previa al fix (historico)
+
 ## Estado inicial git
 
 - Rama: `main`
