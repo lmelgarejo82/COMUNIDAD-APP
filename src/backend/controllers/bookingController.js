@@ -14,7 +14,7 @@ exports.listBookings = async (req, res) => {
 
 exports.myBookings = async (req, res) => {
   try {
-    const rows = await Booking.findByUser(req.user.id);
+    const rows = await Booking.findByUser(req.user.id, req.communityId);
     res.json(rows);
   } catch (err) {
     console.error('Error en myBookings:', err);
@@ -40,7 +40,7 @@ exports.createBooking = async (req, res) => {
       return res.status(400).json({ error: 'amenity_id, date_from y date_to son requeridos' });
     }
 
-    const amenity = await Booking.getAmenityById(amenity_id);
+    const amenity = await Booking.getAmenityById(amenity_id, req.communityId);
     if (!amenity) {
       return res.status(404).json({ error: 'Amenity no encontrado' });
     }
@@ -79,6 +79,7 @@ exports.createBooking = async (req, res) => {
     const user = await require('../models/User').User.findById(req.user.id);
     const booking = await Booking.create({
       amenity_id,
+      community_id: req.communityId,
       user_id: req.user.id,
       unit_number: user.unit_number,
       date_from: from,
@@ -86,6 +87,9 @@ exports.createBooking = async (req, res) => {
       deposit_amount: deposit,
       notes: notes || null,
     });
+    if (!booking) {
+      return res.status(404).json({ error: 'Amenity no encontrado' });
+    }
 
     // Notificar a admins de la comunidad
     const admins = await require('../db').pool.query(
@@ -117,12 +121,15 @@ exports.updateBookingStatus = async (req, res) => {
       return res.status(400).json({ error: 'Estado inválido' });
     }
 
-    const booking = await Booking.findById(id);
+    const booking = await Booking.findById(id, req.communityId);
     if (!booking) {
       return res.status(404).json({ error: 'Reserva no encontrada' });
     }
 
-    const updated = await Booking.updateStatus(id, status);
+    const updated = await Booking.updateStatus(id, status, req.communityId);
+    if (!updated) {
+      return res.status(404).json({ error: 'Reserva no encontrada' });
+    }
 
     await Notification.create({
       user_id: booking.user_id,

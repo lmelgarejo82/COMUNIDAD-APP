@@ -27,11 +27,11 @@ const Announcement = {
     return { data: rows, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) || 1 };
   },
 
-  async findById(id) {
+  async findById(id, communityId) {
     const { rows } = await pool.query(
       `SELECT a.*, u.email AS created_by_email FROM announcements a
        LEFT JOIN users u ON a.created_by = u.id
-       WHERE a.id = $1 AND a.deleted_at IS NULL`, [id]
+       WHERE a.id = $1 AND a.community_id = $2 AND a.deleted_at IS NULL`, [id, communityId]
     );
     return rows[0] || null;
   },
@@ -54,23 +54,31 @@ const Announcement = {
     return { data: rows, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) || 1 };
   },
 
-  async markAsRead(announcementId, userId) {
-    await pool.query(
-      `INSERT INTO announcement_reads (announcement_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-      [announcementId, userId]
-    );
-  },
-
-  async softDelete(id) {
+  async markAsRead(announcementId, userId, communityId) {
     const { rows } = await pool.query(
-      'UPDATE announcements SET deleted_at = NOW() WHERE id = $1 RETURNING *', [id]
+      `INSERT INTO announcement_reads (announcement_id, user_id)
+       SELECT a.id, $2 FROM announcements a
+       WHERE a.id = $1 AND a.community_id = $3 AND a.deleted_at IS NULL
+       ON CONFLICT (announcement_id, user_id)
+       DO UPDATE SET read_at = announcement_reads.read_at
+       RETURNING announcement_reads.*`,
+      [announcementId, userId, communityId]
     );
     return rows[0] || null;
   },
 
-  async updateFile(id, file_url) {
+  async softDelete(id, communityId) {
     const { rows } = await pool.query(
-      'UPDATE announcements SET file_url = $2 WHERE id = $1 RETURNING *', [id, file_url]
+      'UPDATE announcements SET deleted_at = NOW() WHERE id = $1 AND community_id = $2 RETURNING *',
+      [id, communityId]
+    );
+    return rows[0] || null;
+  },
+
+  async updateFile(id, file_url, communityId) {
+    const { rows } = await pool.query(
+      'UPDATE announcements SET file_url = $2 WHERE id = $1 AND community_id = $3 RETURNING *',
+      [id, file_url, communityId]
     );
     return rows[0];
   }

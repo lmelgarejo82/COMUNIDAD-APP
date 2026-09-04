@@ -15,19 +15,18 @@ const Booking = {
     return parseInt(rows[0].count) > 0;
   },
 
-  async create({ amenity_id, user_id, unit_number, date_from, date_to, deposit_amount, notes }) {
-    const { rows: amRows } = await pool.query(
-      'SELECT community_id FROM amenities WHERE id = $1', [amenity_id]
-    );
-    const communityId = amRows[0]?.community_id;
-    const unitId = communityId ? await Hierarchy.resolveUnitId(communityId, unit_number) : null;
+  async create({ amenity_id, community_id, user_id, unit_number, date_from, date_to, deposit_amount, notes }) {
+    const unitId = await Hierarchy.resolveUnitId(community_id, unit_number);
 
     const { rows } = await pool.query(
       `INSERT INTO bookings (amenity_id, user_id, unit_number, unit_id, date_from, date_to, deposit_amount, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [amenity_id, user_id, unit_number, unitId, date_from, date_to, deposit_amount || 0, notes || null]
+       SELECT a.id, $2, $3, $4, $5, $6, $7, $8
+       FROM amenities a
+       WHERE a.id = $1 AND a.community_id = $9
+       RETURNING *`,
+      [amenity_id, user_id, unit_number, unitId, date_from, date_to, deposit_amount || 0, notes || null, community_id]
     );
-    return rows[0];
+    return rows[0] || null;
   },
 
   async findByCommunity(communityId, { status, amenity_id, page = 1, limit = 50 } = {}) {
@@ -57,30 +56,34 @@ const Booking = {
     return { data: rows, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) || 1 };
   },
 
-  async findByUser(userId) {
+  async findByUser(userId, communityId) {
     const { rows } = await pool.query(
       `SELECT b.*, a.name AS amenity_name
        FROM bookings b JOIN amenities a ON b.amenity_id = a.id
-       WHERE b.user_id = $1 ORDER BY b.date_from DESC LIMIT 50`,
-      [userId]
+       WHERE b.user_id = $1 AND a.community_id = $2
+       ORDER BY b.date_from DESC LIMIT 50`,
+      [userId, communityId]
     );
     return rows;
   },
 
-  async findById(id) {
+  async findById(id, communityId) {
     const { rows } = await pool.query(
       `SELECT b.*, a.name AS amenity_name, a.rules, u.email AS user_email
        FROM bookings b
        JOIN amenities a ON b.amenity_id = a.id
        LEFT JOIN users u ON b.user_id = u.id
-       WHERE b.id = $1`, [id]
+       WHERE b.id = $1 AND a.community_id = $2`, [id, communityId]
     );
     return rows[0] || null;
   },
 
-  async updateStatus(id, status) {
+  async updateStatus(id, status, communityId) {
     const { rows } = await pool.query(
-      `UPDATE bookings SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`, [id, status]
+      `UPDATE bookings b SET status = $2, updated_at = NOW()
+       FROM amenities a
+       WHERE b.id = $1 AND b.amenity_id = a.id AND a.community_id = $3
+       RETURNING b.*`, [id, status, communityId]
     );
     return rows[0] || null;
   },
@@ -92,8 +95,11 @@ const Booking = {
     return rows;
   },
 
-  async getAmenityById(id) {
-    const { rows } = await pool.query('SELECT * FROM amenities WHERE id = $1', [id]);
+  async getAmenityById(id, communityId) {
+    const { rows } = await pool.query(
+      'SELECT * FROM amenities WHERE id = $1 AND community_id = $2',
+      [id, communityId]
+    );
     return rows[0] || null;
   }
 };

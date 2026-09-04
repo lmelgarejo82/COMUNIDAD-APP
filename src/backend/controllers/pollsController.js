@@ -26,8 +26,8 @@ exports.list = async (req, res) => {
     const polls = await Poll.findByCommunity(req.communityId);
     const result = await Promise.all(
       polls.map(async (p) => {
-        const hasVoted = await Poll.hasVoted(p.id, req.user.id);
-        const results = await Poll.getResults(p.id);
+        const hasVoted = await Poll.hasVoted(p.id, req.user.id, req.communityId);
+        const results = await Poll.getResults(p.id, req.communityId);
         return { ...p, options: typeof p.options === 'string' ? JSON.parse(p.options) : p.options, has_voted: hasVoted, results };
       })
     );
@@ -43,7 +43,7 @@ exports.vote = async (req, res) => {
     const { id } = req.params;
     const { option_index } = req.body;
 
-    const poll = await Poll.findById(id);
+    const poll = await Poll.findById(id, req.communityId);
     if (!poll) return res.status(404).json({ error: 'Votación no encontrada' });
     if (poll.expires_at && new Date(poll.expires_at) < new Date()) {
       return res.status(400).json({ error: 'La votación ya expiró' });
@@ -54,7 +54,7 @@ exports.vote = async (req, res) => {
       return res.status(403).json({ error: 'Solo los propietarios pueden votar' });
     }
 
-    const alreadyVoted = await Poll.hasVoted(id, req.user.id);
+    const alreadyVoted = await Poll.hasVoted(id, req.user.id, req.communityId);
     if (alreadyVoted) return res.status(409).json({ error: 'Ya votaste en esta encuesta' });
 
     const options = typeof poll.options === 'string' ? JSON.parse(poll.options) : poll.options;
@@ -62,7 +62,8 @@ exports.vote = async (req, res) => {
       return res.status(400).json({ error: 'Opción inválida' });
     }
 
-    const vote = await Poll.vote(id, req.user.id, option_index);
+    const vote = await Poll.vote(id, req.user.id, option_index, req.communityId);
+    if (!vote) return res.status(404).json({ error: 'Votación no encontrada' });
     res.status(201).json(vote);
   } catch (err) {
     console.error('Error en vote:', err);

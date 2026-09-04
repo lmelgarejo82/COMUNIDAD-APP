@@ -20,8 +20,16 @@ exports.invite = async (req, res) => {
 
     // If unit_id is provided, resolve unit_number from the units table
     if (resolvedUnitId) {
-      const { rows } = await pool.query('SELECT unit_code FROM units WHERE id = $1', [resolvedUnitId]);
+      const { rows } = await pool.query(
+        `SELECT u.id, u.unit_code FROM units u
+         JOIN floors f ON u.floor_id = f.id
+         JOIN buildings b ON f.building_id = b.id
+         JOIN complexes cx ON b.complex_id = cx.id
+         WHERE u.id = $1 AND cx.community_id = $2`,
+        [resolvedUnitId, req.communityId]
+      );
       if (!rows[0]) return res.status(404).json({ error: 'Unidad no encontrada' });
+      resolvedUnitId = rows[0].id;
       resolvedUnitNumber = rows[0].unit_code;
     } else if (resolvedUnitNumber) {
       // Legacy: resolve unit_id from unit_number if possible
@@ -42,13 +50,9 @@ exports.invite = async (req, res) => {
       email,
       community_id: req.communityId,
       unit_number: resolvedUnitNumber,
+      unit_id: resolvedUnitId,
       created_by: req.user.id,
     });
-
-    // Additionally update the invite's unit_id directly if resolved
-    if (resolvedUnitId) {
-      await pool.query('UPDATE invites SET unit_id = $1 WHERE id = $2', [resolvedUnitId, invite.id]);
-    }
 
     const inviteUrl = `${req.protocol}://${req.get('host')}/register?token=${invite.token}`;
 

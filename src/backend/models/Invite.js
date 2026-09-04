@@ -3,10 +3,10 @@ const crypto = require('crypto');
 const { Hierarchy } = require('./Hierarchy');
 
 const Invite = {
-  async create({ email, community_id, unit_number, created_by }) {
+  async create({ email, community_id, unit_number, unit_id, created_by }) {
     const token = crypto.randomBytes(32).toString('hex');
     const expires = new Date(Date.now() + 7 * 24 * 3600000);
-    const unitId = await Hierarchy.resolveUnitId(community_id, unit_number);
+    const unitId = unit_id || await Hierarchy.resolveUnitId(community_id, unit_number);
     const { rows } = await pool.query(
       `INSERT INTO invites (email, community_id, unit_number, unit_id, token, created_by, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,

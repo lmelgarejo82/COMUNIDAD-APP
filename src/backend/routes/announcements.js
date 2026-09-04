@@ -31,7 +31,7 @@ router.post('/', authenticate, authorize('admin'), setCommunity, sanitize('title
   upload.single('file'), announcementController.create);
 router.get('/admin', authenticate, authorize('admin'), setCommunity, announcementController.listForAdmin);
 router.get('/', authenticate, authorize('admin', 'residente'), setCommunity, announcementController.listForResident);
-router.put('/:id/read', authenticate, authorize('admin', 'residente'), announcementController.markAsRead);
+router.put('/:id/read', authenticate, authorize('admin', 'residente'), setCommunity, announcementController.markAsRead);
 router.delete('/:id', authenticate, authorize('admin'), setCommunity,
   logAudit('DELETE_ANNOUNCEMENT', (req) => ({ id: req.params.id })),
   announcementController.delete);

@@ -46,7 +46,8 @@ exports.listForResident = async (req, res) => {
 
 exports.markAsRead = async (req, res) => {
   try {
-    await Announcement.markAsRead(req.params.id, req.user.id);
+    const announcement = await Announcement.markAsRead(req.params.id, req.user.id, req.communityId);
+    if (!announcement) return res.status(404).json({ error: 'Anuncio no encontrado' });
     res.json({ message: 'Marcado como leído' });
   } catch (err) {
     console.error('Error en markAsRead:', err);
@@ -56,7 +57,7 @@ exports.markAsRead = async (req, res) => {
 
 exports.delete = async (req, res) => {
   try {
-    const deleted = await Announcement.softDelete(req.params.id);
+    const deleted = await Announcement.softDelete(req.params.id, req.communityId);
     if (!deleted) return res.status(404).json({ error: 'Anuncio no encontrado' });
     res.json({ message: 'Anuncio eliminado' });
   } catch (err) {

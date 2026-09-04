@@ -23,36 +23,47 @@ const Poll = {
     return rows;
   },
 
-  async findById(id) {
+  async findById(id, communityId) {
     const { rows } = await pool.query(
       `SELECT p.*, u.email AS created_by_email,
               (SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id) AS votes_count
-       FROM polls p LEFT JOIN users u ON p.created_by = u.id WHERE p.id = $1`, [id]
+       FROM polls p LEFT JOIN users u ON p.created_by = u.id
+       WHERE p.id = $1 AND p.community_id = $2`, [id, communityId]
     );
     return rows[0] || null;
   },
 
-  async getResults(pollId) {
+  async getResults(pollId, communityId) {
     const { rows } = await pool.query(
-      `SELECT option_index, COUNT(*) AS count FROM poll_votes WHERE poll_id = $1 GROUP BY option_index ORDER BY option_index`,
-      [pollId]
+      `SELECT pv.option_index, COUNT(*) AS count
+       FROM poll_votes pv
+       JOIN polls p ON p.id = pv.poll_id
+       WHERE pv.poll_id = $1 AND p.community_id = $2
+       GROUP BY pv.option_index ORDER BY pv.option_index`,
+      [pollId, communityId]
     );
     return rows;
   },
 
-  async hasVoted(pollId, userId) {
+  async hasVoted(pollId, userId, communityId) {
     const { rows } = await pool.query(
-      'SELECT id FROM poll_votes WHERE poll_id = $1 AND user_id = $2', [pollId, userId]
+      `SELECT pv.id FROM poll_votes pv
+       JOIN polls p ON p.id = pv.poll_id
+       WHERE pv.poll_id = $1 AND pv.user_id = $2 AND p.community_id = $3`,
+      [pollId, userId, communityId]
     );
     return rows.length > 0;
   },
 
-  async vote(pollId, userId, optionIndex) {
+  async vote(pollId, userId, optionIndex, communityId) {
     const { rows } = await pool.query(
-      `INSERT INTO poll_votes (poll_id, user_id, option_index) VALUES ($1, $2, $3) RETURNING *`,
-      [pollId, userId, optionIndex]
+      `INSERT INTO poll_votes (poll_id, user_id, option_index)
+       SELECT p.id, $2, $3 FROM polls p
+       WHERE p.id = $1 AND p.community_id = $4
+       RETURNING *`,
+      [pollId, userId, optionIndex, communityId]
     );
-    return rows[0];
+    return rows[0] || null;
   }
 };
 

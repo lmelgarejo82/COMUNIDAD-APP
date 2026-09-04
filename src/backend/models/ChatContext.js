@@ -20,9 +20,9 @@ const ChatContext = {
     const lastPaid = await pool.query(
       `SELECT e.description, ue.amount_owed, e.due_date
        FROM unit_expenses ue JOIN expenses e ON ue.expense_id = e.id
-       WHERE ue.unit_number = $1 AND ue.status = 'paid'
+       WHERE ue.unit_number = $1 AND e.community_id = $2 AND ue.status = 'paid'
        ORDER BY ue.confirmed_at DESC LIMIT 1`,
-      [user.unit_number]
+      [user.unit_number, user.community_id]
     );
 
     // Anuncios no leídos
