@@ -119,3 +119,17 @@ test('new migration persists only the actual ownership enum on invites', () => {
   assert.match(sql, /ALTER COLUMN ownership_type SET NOT NULL/i);
   assert.match(sql, /CHECK \(ownership_type IN \('owner', 'tenant'\)\)/i);
 });
+
+test('migration 029 expires only ambiguous pending invites without rewriting used history', () => {
+  const sql = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', '029_invalidate_legacy_invites.sql'),
+    'utf8'
+  );
+
+  assert.match(sql, /filename = '028_invite_ownership_type\.sql'/i);
+  assert.match(sql, /SET expires_at = LEAST\(expires_at, ownership_cutoff\)/i);
+  assert.match(sql, /used IS NOT TRUE/i);
+  assert.match(sql, /created_at IS NULL OR created_at <= ownership_cutoff/i);
+  assert.doesNotMatch(sql, /SET\s+used\s*=/i);
+  assert.doesNotMatch(sql, /UPDATE\s+invites[\s\S]*ownership_type\s*=/i);
+});

@@ -50,28 +50,37 @@ exports.invite = async (req, res) => {
 
     const inviteUrl = `${req.protocol}://${req.get('host')}/register?token=${invite.token}`;
 
-    const info = await transporter.sendMail({
-      from: '"Comunidad App" <noreply@comunidad.app>',
-      to: email,
-      subject: 'Invitación a Comunidad App',
-      html: `
-        <h2>Fuiste invitado a Comunidad App</h2>
-        <p>Hacé clic en el siguiente enlace para registrarte:</p>
-        <a href="${inviteUrl}">${inviteUrl}</a>
-        <p><strong>Unidad asignada:</strong> ${resolvedUnitNumber}</p>
-        <p><strong>Tipo:</strong> ${ownership_type === 'owner' ? 'Propietario' : 'Inquilino'}</p>
-        <p>Este enlace expira en 7 días.</p>
-      `,
-    });
-
-    console.log('Email invitación enviado:', nodemailer.getTestMessageUrl(info));
+    let emailSent = false;
+    let deliveryWarning = null;
+    try {
+      const info = await transporter.sendMail({
+        from: '"Comunidad App" <noreply@comunidad.app>',
+        to: email,
+        subject: 'Invitación a Comunidad App',
+        html: `
+          <h2>Fuiste invitado a Comunidad App</h2>
+          <p>Hacé clic en el siguiente enlace para registrarte:</p>
+          <a href="${inviteUrl}">${inviteUrl}</a>
+          <p><strong>Unidad asignada:</strong> ${resolvedUnitNumber}</p>
+          <p><strong>Tipo:</strong> ${ownership_type === 'owner' ? 'Propietario' : 'Inquilino'}</p>
+          <p>Este enlace expira en 7 días.</p>
+        `,
+      });
+      emailSent = true;
+      console.log('Email invitación enviado:', nodemailer.getTestMessageUrl(info));
+    } catch (emailError) {
+      deliveryWarning = 'La invitación fue creada, pero no se pudo enviar el email.';
+      console.error('Invitación persistida; falló el envío de email:', emailError);
+    }
 
     res.status(201).json({
-      message: 'Invitación enviada',
+      message: emailSent ? 'Invitación enviada' : 'Invitación creada',
       token: invite.token,
       unit_id: resolvedUnitId,
       unit_number: resolvedUnitNumber,
       ownership_type,
+      email_sent: emailSent,
+      delivery_warning: deliveryWarning,
     });
   } catch (err) {
     console.error('Error en invite:', err);

@@ -282,13 +282,13 @@ test('admin cannot delete a valid announcement from another community', async ()
   assert.deepEqual(res.body, { error: 'Anuncio no encontrado' });
 });
 
-function loadAdminController({ onQuery, inviteImpl }) {
+function loadAdminController({ onQuery, inviteImpl, sendMail = async () => ({}) }) {
   clear([adminControllerPath, invitePath, adminComplexPath, dbPath, nodemailerPath]);
   mockModule(invitePath, { Invite: inviteImpl });
   mockModule(adminComplexPath, { AdminComplex: {} });
   mockModule(dbPath, { pool: { query: onQuery } });
   mockModule(nodemailerPath, {
-    createTransport: () => ({ sendMail: async () => ({}) }),
+    createTransport: () => ({ sendMail }),
     getTestMessageUrl: () => null,
   });
   return require('../controllers/adminController');
@@ -330,6 +330,69 @@ test('admin invites a unit from req.communityId without a second mutation', asyn
   assert.equal(created.unit_id, 11);
   assert.equal(created.community_id, 7);
   assert.equal(created.ownership_type, 'owner');
+  assert.equal(res.body.message, 'Invitación enviada');
+  assert.equal(res.body.email_sent, true);
+  assert.equal(res.body.delivery_warning, null);
+});
+
+test('SMTP failure after persistence returns success with a delivery warning and creates once', async () => {
+  let createCalls = 0;
+  const { invite } = loadAdminController({
+    async onQuery() {
+      return { rows: [{ id: 11, unit_code: 'A-101' }] };
+    },
+    inviteImpl: {
+      async create(payload) {
+        createCalls += 1;
+        return { id: 82, token: 'persisted-token', unit_id: 11, ...payload };
+      },
+    },
+    sendMail: async () => { throw new Error('SMTP unavailable'); },
+  });
+  const res = createResponse();
+  const originalError = console.error;
+  console.error = () => {};
+
+  try {
+    await invite(inviteRequest(11), res);
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(createCalls, 1);
+  assert.equal(res.body.message, 'Invitación creada');
+  assert.equal(res.body.email_sent, false);
+  assert.match(res.body.delivery_warning, /creada.*no se pudo enviar/i);
+  assert.equal(res.body.token, 'persisted-token');
+});
+
+test('invite persistence failure remains a real server failure and does not attempt email', async () => {
+  let emailAttempts = 0;
+  const { invite } = loadAdminController({
+    async onQuery() {
+      return { rows: [{ id: 11, unit_code: 'A-101' }] };
+    },
+    inviteImpl: {
+      async create() {
+        throw new Error('database failure');
+      },
+    },
+    sendMail: async () => { emailAttempts += 1; },
+  });
+  const res = createResponse();
+  const originalError = console.error;
+  console.error = () => {};
+
+  try {
+    await invite(inviteRequest(11), res);
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.equal(res.statusCode, 500);
+  assert.equal(emailAttempts, 0);
+  assert.deepEqual(res.body, { error: 'Error interno del servidor' });
 });
 
 test('admin cannot invite a valid unit from another community', async () => {

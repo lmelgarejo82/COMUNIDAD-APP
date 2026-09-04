@@ -204,6 +204,41 @@ test('invite acceptance atomically uses only admin-selected identity claims', as
   ]);
 });
 
+test('a new owner invite creates an authoritative owner relationship', async () => {
+  const events = [];
+  const client = transactionClient(events);
+  const inviteRow = {
+    id: 22, email: 'owner@example.test', community_id: 7, unit_id: 12,
+    resolved_unit_number: 'A-102', ownership_type: 'owner',
+  };
+  let created;
+  const { register } = loadAuth({
+    user: {
+      findByEmail: async () => null,
+      create: async (payload) => {
+        created = payload;
+        events.push('user');
+        return { id: 92, ...payload };
+      },
+      findById: async () => ({ id: 92, ...created }),
+    },
+    community: {},
+    invite: {
+      findForAcceptance: async () => { events.push('invite-lock'); return inviteRow; },
+      markUsed: async () => { events.push('consume'); return true; },
+    },
+    client,
+  });
+  const res = response();
+
+  await register({ body: { email: inviteRow.email, password: 'Secure123!', inviteToken: 'owner-token' } }, res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(created.user_type, 'owner');
+  assert.deepEqual(events.find(event => Array.isArray(event)), ['ownership', [12, 92, 'owner']]);
+  assert.ok(events.includes('COMMIT'));
+});
+
 test('failed ownership creation rolls back user and leaves invite unconsumed', async () => {
   const events = [];
   const client = transactionClient(events, { failOwnership: true });
