@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { pool } = require('../db');
 const { VisitorAccessLog } = require('./VisitorAccessLog');
 const { VisitorPreauthorization } = require('./VisitorPreauthorization');
+const { getJwtSecret } = require('../config/security');
 
 const DEFAULT_TOKEN_TTL_HOURS = 24;
 
@@ -20,11 +21,7 @@ const baseSelect = `
 `;
 
 function hashToken(token) {
-  const secret = process.env.JWT_SECRET || process.env.INVITATION_TOKEN_SECRET;
-  if (secret) {
-    return crypto.createHmac('sha256', secret).update(token).digest('hex');
-  }
-  return crypto.createHash('sha256').update(token).digest('hex');
+  return crypto.createHmac('sha256', getJwtSecret()).update(token).digest('hex');
 }
 
 function createToken() {

@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+node -e "require('./config/security').validateSecurityConfig()"
+
 echo "Esperando PostgreSQL en db:5432..."
 until pg_isready -h db -U postgres -d comunidad; do
   sleep 2

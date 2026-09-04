@@ -5,6 +5,7 @@ const nodemailer = require('nodemailer');
 const { User, Community } = require('../models/User');
 const { Invite } = require('../models/Invite');
 const { pool } = require('../db');
+const { getJwtSecret, getPublicAppOrigin } = require('../config/security');
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
@@ -18,7 +19,7 @@ const transporter = nodemailer.createTransport({
 function generateToken(user) {
   return jwt.sign(
     { id: user.id, email: user.email, role: user.role },
-    process.env.JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 }
@@ -193,7 +194,10 @@ exports.forgotPassword = async (req, res) => {
 
     await User.setResetToken(email, resetToken, resetTokenExpires);
 
-    const resetUrl = `${req.protocol}://${req.get('host')}/api/auth/reset-password/${resetToken}`;
+    const resetUrl = new URL(
+      `/api/auth/reset-password/${encodeURIComponent(resetToken)}`,
+      `${getPublicAppOrigin()}/`
+    ).toString();
 
     const info = await transporter.sendMail({
       from: '"Comunidad App" <noreply@comunidad.app>',

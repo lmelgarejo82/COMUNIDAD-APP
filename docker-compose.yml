@@ -32,9 +32,11 @@ services:
     restart: unless-stopped
     environment:
       PORT: '3000'
+      NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: postgresql://postgres:postgres@db:5432/comunidad
-      JWT_SECRET: ${JWT_SECRET:-cambiar-por-secreto-seguro-en-produccion}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET explicitly}
       JWT_EXPIRES_IN: 7d
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL explicitly}
       EMAIL_HOST: smtp.ethereal.email
       EMAIL_PORT: '587'
       EMAIL_USER: ''

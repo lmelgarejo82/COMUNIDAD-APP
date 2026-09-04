@@ -1,4 +1,7 @@
 require('dotenv').config();
+const { validateSecurityConfig } = require('./config/security');
+validateSecurityConfig();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
