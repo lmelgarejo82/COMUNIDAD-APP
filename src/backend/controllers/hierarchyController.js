@@ -504,6 +504,10 @@ exports.reorganizeUnits = async (req, res) => {
       return res.status(400).json({ error: 'entries debe ser un array no vacío' });
     }
     for (const entry of entries) {
+      const unitId = entry.unit_id || entry.id;
+      if (unitId && !(await validateUnitOwnership(req.communityId, parseInt(unitId)))) {
+        return res.status(403).json({ error: 'Una unidad no pertenece a tu comunidad' });
+      }
       if (entry.new_floor_id) {
         const { rows } = await pool.query(
           `SELECT f.id FROM floors f JOIN buildings b ON f.building_id = b.id
@@ -513,7 +517,7 @@ exports.reorganizeUnits = async (req, res) => {
         if (!rows[0]) return res.status(403).json({ error: `El piso ${entry.new_floor_id} no pertenece a tu comunidad`, unit_id: entry.unit_id });
       }
     }
-    const result = await Hierarchy.reorganizeUnits(entries);
+    const result = await Hierarchy.reorganizeUnits(req.communityId, entries);
     invalidatePattern('hierarchy:tree:*').catch(() => {});
     res.json(result);
   } catch (err) {
@@ -709,14 +713,30 @@ exports.bulkCreate = async (req, res) => {
 // ──────────────────────────────────────────────
 
 exports.assignUnit = async (req, res) => {
+  let client;
   try {
     const { unit_id, user_id, ownership_type, start_date } = req.body;
     if (!unit_id || !user_id) return res.status(400).json({ error: 'unit_id y user_id son requeridos' });
-    if (!(await validateUnitOwnership(req.communityId, parseInt(unit_id)))) {
-      return res.status(403).json({ error: 'La unidad no pertenece a tu comunidad' });
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const { rows: accessRows } = await client.query(
+      `SELECT u.id AS unit_id, usr.id AS user_id
+       FROM units u
+       JOIN floors f ON u.floor_id = f.id
+       JOIN buildings b ON f.building_id = b.id
+       JOIN complexes cx ON b.complex_id = cx.id
+       JOIN users usr ON usr.id = $2 AND usr.community_id = cx.community_id
+       WHERE u.id = $1 AND cx.community_id = $3
+       FOR UPDATE OF u, f, b, cx, usr`,
+      [parseInt(unit_id), parseInt(user_id), req.communityId]
+    );
+    if (!accessRows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'La unidad y el usuario deben pertenecer a tu comunidad' });
     }
 
-    const { rows } = await pool.query(
+    const { rows } = await client.query(
       `INSERT INTO unit_ownerships (unit_id, user_id, ownership_type, start_date, is_primary)
        VALUES ($1, $2, $3, $4, TRUE)
        ON CONFLICT (unit_id, user_id) DO UPDATE
@@ -726,12 +746,24 @@ exports.assignUnit = async (req, res) => {
     );
 
     // Also update user's unit_id
-    await pool.query('UPDATE users SET unit_id = $1, unit_number = (SELECT unit_code FROM units WHERE id = $1) WHERE id = $2', [unit_id, user_id]);
+    const { rows: userRows } = await client.query(
+      `UPDATE users
+       SET unit_id = $1, unit_number = (SELECT unit_code FROM units WHERE id = $1)
+       WHERE id = $2 AND community_id = $3
+       RETURNING id`,
+      [unit_id, user_id, req.communityId]
+    );
+    if (!userRows[0]) throw new Error('USER_SCOPE_CHANGED');
+
+    await client.query('COMMIT');
 
     res.status(201).json(rows[0]);
   } catch (err) {
+    if (client) await client.query('ROLLBACK');
     console.error('Error en assignUnit:', err);
     res.status(500).json({ error: err.message });
+  } finally {
+    if (client) client.release();
   }
 };
 
@@ -739,9 +771,19 @@ exports.endAssignment = async (req, res) => {
   try {
     const { id } = req.params;
     const { rows } = await pool.query(
-      `UPDATE unit_ownerships SET end_date = NOW(), is_primary = FALSE
-       WHERE id = $1 AND end_date IS NULL RETURNING *`,
-      [parseInt(id)]
+      `UPDATE unit_ownerships uo SET end_date = NOW(), is_primary = FALSE
+       WHERE uo.id = $1
+         AND uo.end_date IS NULL
+         AND EXISTS (
+           SELECT 1
+           FROM units u
+           JOIN floors f ON u.floor_id = f.id
+           JOIN buildings b ON f.building_id = b.id
+           JOIN complexes cx ON b.complex_id = cx.id
+           WHERE u.id = uo.unit_id AND cx.community_id = $2
+         )
+       RETURNING uo.*`,
+      [parseInt(id), req.communityId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Asignación no encontrada o ya finalizada' });
     res.json(rows[0]);

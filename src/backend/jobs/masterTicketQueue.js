@@ -169,15 +169,22 @@ async function processJob(job) {
         unitIds.add(row.unit_id);
       } else if (row.floor_id) {
         const { rows: floorUnits } = await client.query(
-          'SELECT id FROM units WHERE floor_id = $1', [row.floor_id]
+          `SELECT u.id FROM units u
+           JOIN floors f ON u.floor_id = f.id
+           JOIN buildings b ON f.building_id = b.id
+           JOIN complexes cx ON b.complex_id = cx.id
+           WHERE f.id = $1 AND cx.community_id = $2`,
+          [row.floor_id, master.community_id]
         );
         floorUnits.forEach(u => unitIds.add(u.id));
       } else if (row.building_id) {
         const { rows: buildingUnits } = await client.query(
           `SELECT u.id FROM units u
            JOIN floors f ON u.floor_id = f.id
-           WHERE f.building_id = $1`,
-          [row.building_id]
+           JOIN buildings b ON f.building_id = b.id
+           JOIN complexes cx ON b.complex_id = cx.id
+           WHERE b.id = $1 AND cx.community_id = $2`,
+          [row.building_id, master.community_id]
         );
         buildingUnits.forEach(u => unitIds.add(u.id));
       }
@@ -195,7 +202,12 @@ async function processJob(job) {
 
     for (const unitId of unitIds) {
       const { rows: unitRows } = await client.query(
-        `SELECT u.unit_code FROM units u WHERE u.id = $1`, [unitId]
+        `SELECT u.unit_code FROM units u
+         JOIN floors f ON u.floor_id = f.id
+         JOIN buildings b ON f.building_id = b.id
+         JOIN complexes cx ON b.complex_id = cx.id
+         WHERE u.id = $1 AND cx.community_id = $2`,
+        [unitId, master.community_id]
       );
       const unit = unitRows[0];
       if (!unit) continue;
@@ -204,10 +216,11 @@ async function processJob(job) {
         `SELECT uo.user_id, us.email FROM unit_ownerships uo
          JOIN users us ON uo.user_id = us.id
          WHERE uo.unit_id = $1
+           AND us.community_id = $2
            AND (uo.end_date IS NULL OR uo.end_date > NOW())
          ORDER BY uo.is_primary DESC
          LIMIT 1`,
-        [unitId]
+        [unitId, master.community_id]
       );
 
       const ticketUserId = ownerRows[0]?.user_id || master.created_by;

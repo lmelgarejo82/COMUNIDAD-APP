@@ -89,6 +89,11 @@ router.post('/units',
   logAudit('CREATE_UNIT', (req, body) => ({ unit: body })),
   hc.createUnit
 );
+router.put('/units/reorganize',
+  authenticate, authorize('admin'), setCommunity,
+  logAudit('REORGANIZE_UNITS', (req) => ({ count: req.body.entries?.length })),
+  hc.reorganizeUnits
+);
 router.put('/units/:id',
   authenticate, authorize('admin'), setCommunity,
   sanitize('unit_code'),
@@ -105,12 +110,6 @@ router.patch('/units/:id/move',
   logAudit('MOVE_UNIT', (req) => ({ unit_id: req.params.id, new_floor_id: req.body.new_floor_id })),
   hc.moveUnit
 );
-router.put('/units/reorganize',
-  authenticate, authorize('admin'), setCommunity,
-  logAudit('REORGANIZE_UNITS', (req) => ({ count: req.body.entries?.length })),
-  hc.reorganizeUnits
-);
-
 // Unified move endpoint
 router.put('/move',
   authenticate, authorize('admin'), setCommunity,

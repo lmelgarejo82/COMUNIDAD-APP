@@ -52,6 +52,9 @@ exports.create = async (req, res) => {
     });
     invalidatePattern('dashboard:*').catch(() => {});
   } catch (err) {
+    if (err.code === 'MASTER_TICKET_SCOPE_INVALID') {
+      return res.status(403).json({ error: 'El alcance no pertenece a tu comunidad' });
+    }
     console.error('Error en create master ticket:', err);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
@@ -70,7 +73,7 @@ exports.list = async (req, res) => {
 
 exports.getById = async (req, res) => {
   try {
-    const detail = await MasterTicket.getMasterTicket(req.params.id);
+    const detail = await MasterTicket.getMasterTicket(req.params.id, req.communityId);
     if (!detail) return res.status(404).json({ error: 'Master ticket no encontrado' });
     res.json(detail);
   } catch (err) {
@@ -84,10 +87,10 @@ exports.update = async (req, res) => {
     const { id } = req.params;
     const { title, description, category, severity, status, file_url } = req.body;
 
-    const existing = await MasterTicket.getMasterTicket(id);
+    const existing = await MasterTicket.getMasterTicket(id, req.communityId);
     if (!existing) return res.status(404).json({ error: 'Master ticket no encontrado' });
 
-    const updated = await MasterTicket.updateMasterTicket(id, {
+    const updated = await MasterTicket.updateMasterTicket(id, req.communityId, {
       title,
       description: description !== undefined
         ? formatDescription(description, severity, req.body.estimated_resolution)
@@ -109,13 +112,13 @@ exports.resolveSubTicket = async (req, res) => {
     const { id, ticketId } = req.params;
     const ticketIdNum = parseInt(ticketId);
 
-    const detail = await MasterTicket.getMasterTicket(id);
+    const detail = await MasterTicket.getMasterTicket(id, req.communityId);
     if (!detail) return res.status(404).json({ error: 'Master ticket no encontrado' });
 
     const subTicket = detail.sub_tickets?.find(t => t.id === ticketIdNum);
     if (!subTicket) return res.status(404).json({ error: 'Sub-ticket no encontrado en este master ticket' });
 
-    const result = await MasterTicket.resolveSubTicket(ticketIdNum);
+    const result = await MasterTicket.resolveSubTicket(id, ticketIdNum, req.communityId);
     if (!result.ticket) return res.status(404).json({ error: 'Sub-ticket no encontrado o ya resuelto' });
 
     res.json({
@@ -132,7 +135,7 @@ exports.resolveSubTicket = async (req, res) => {
 exports.notify = async (req, res) => {
   try {
     const { id } = req.params;
-    const detail = await MasterTicket.getMasterTicket(id);
+    const detail = await MasterTicket.getMasterTicket(id, req.communityId);
     if (!detail) return res.status(404).json({ error: 'Master ticket no encontrado' });
     if (detail.status !== 'open') {
       return res.status(400).json({ error: 'Solo se pueden reenviar notificaciones de tickets en estado open' });

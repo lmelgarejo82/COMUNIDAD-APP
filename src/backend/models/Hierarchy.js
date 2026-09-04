@@ -476,20 +476,47 @@ const Hierarchy = {
     return map;
   },
 
-  async reorganizeUnits(entries, client = null) {
+  async reorganizeUnits(communityId, entries, client = null) {
     const db = getQuery(client);
     const results = [];
     const errors = [];
     for (const entry of entries) {
       try {
-        const { unit_id, new_floor_id } = entry;
-        if (!unit_id || !new_floor_id) {
-          errors.push({ unit_id, error: 'unit_id y new_floor_id son requeridos' });
+        const unit_id = entry.unit_id || entry.id;
+        const { new_floor_id, sort_order } = entry;
+        if (!unit_id || (!new_floor_id && sort_order === undefined)) {
+          errors.push({ unit_id, error: 'unit_id y new_floor_id o sort_order son requeridos' });
           continue;
         }
+
+        if (!new_floor_id) {
+          const { rows: reorderedRows } = await db.query(
+            `UPDATE units u SET sort_order = $2
+             WHERE u.id = $1
+               AND EXISTS (
+                 SELECT 1
+                 FROM floors current_floor
+                 JOIN buildings current_building ON current_floor.building_id = current_building.id
+                 JOIN complexes current_complex ON current_building.complex_id = current_complex.id
+                 WHERE current_floor.id = u.floor_id AND current_complex.community_id = $3
+               )
+             RETURNING u.*`,
+            [unit_id, sort_order, communityId]
+          );
+          if (!reorderedRows[0]) {
+            errors.push({ unit_id, error: `Unidad ${unit_id} no existe` });
+            continue;
+          }
+          results.push(reorderedRows[0]);
+          continue;
+        }
+
         const { rows: floorRows } = await db.query(
           `SELECT f.id AS floor_id, f.building_id, b.complex_id, b.name AS building_name, f.number AS floor_number
-           FROM floors f JOIN buildings b ON f.building_id = b.id WHERE f.id = $1`, [new_floor_id]
+           FROM floors f
+           JOIN buildings b ON f.building_id = b.id
+           JOIN complexes cx ON b.complex_id = cx.id
+           WHERE f.id = $1 AND cx.community_id = $2`, [new_floor_id, communityId]
         );
         if (!floorRows[0]) { errors.push({ unit_id, error: `Piso ${new_floor_id} no existe` }); continue; }
         const floor = floorRows[0];
@@ -500,7 +527,24 @@ const Hierarchy = {
           errors.push({ unit_id, error: `Piso no pertenece al complejo ${entry.new_complex_id}` }); continue;
         }
         const { rows: unitRows } = await db.query(
-          'UPDATE units SET floor_id = $2 WHERE id = $1 RETURNING *', [unit_id, new_floor_id]
+          `UPDATE units u SET floor_id = $2, sort_order = COALESCE($4, u.sort_order)
+           WHERE u.id = $1
+             AND EXISTS (
+               SELECT 1
+               FROM floors current_floor
+               JOIN buildings current_building ON current_floor.building_id = current_building.id
+               JOIN complexes current_complex ON current_building.complex_id = current_complex.id
+               WHERE current_floor.id = u.floor_id AND current_complex.community_id = $3
+             )
+             AND EXISTS (
+               SELECT 1
+               FROM floors desired_floor
+               JOIN buildings desired_building ON desired_floor.building_id = desired_building.id
+               JOIN complexes desired_complex ON desired_building.complex_id = desired_complex.id
+               WHERE desired_floor.id = $2 AND desired_complex.community_id = $3
+             )
+           RETURNING u.*`,
+          [unit_id, new_floor_id, communityId, sort_order ?? null]
         );
         if (!unitRows[0]) { errors.push({ unit_id, error: `Unidad ${unit_id} no existe` }); continue; }
         results.push({ ...unitRows[0], new_floor_number: floor.floor_number, new_building_name: floor.building_name, new_complex_id: floor.complex_id });

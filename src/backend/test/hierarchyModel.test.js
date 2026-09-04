@@ -55,3 +55,46 @@ test('Hierarchy.searchUnits includes normalized building floor unit route search
   assert.match(receivedSql, /CONCAT_WS\(' ', b\.name, f\.number, u\.unit_code, cx\.name\) ILIKE/);
   assert.equal(rows[0].unit_code, 'A1B');
 });
+
+test('Hierarchy.reorganizeUnits scopes both destination lookup and source mutation', async () => {
+  const calls = [];
+  const Hierarchy = loadHierarchy((sql, params) => {
+    calls.push({ sql, params });
+    if (/FROM floors f/.test(sql)) {
+      return {
+        rows: [{
+          floor_id: 10,
+          building_id: 20,
+          complex_id: 70,
+          building_name: 'Torre A',
+          floor_number: 1,
+        }],
+      };
+    }
+    return { rows: [{ id: 1, floor_id: 10 }] };
+  });
+
+  const result = await Hierarchy.reorganizeUnits(7, [{ unit_id: 1, new_floor_id: 10 }]);
+
+  assert.equal(result.updated.length, 1);
+  assert.match(calls[0].sql, /cx\.community_id = \$2/);
+  assert.deepEqual(calls[0].params, [10, 7]);
+  assert.match(calls[1].sql, /current_complex\.community_id = \$3/);
+  assert.match(calls[1].sql, /desired_complex\.community_id = \$3/);
+  assert.deepEqual(calls[1].params, [1, 10, 7, null]);
+});
+
+test('Hierarchy.reorganizeUnits supports the existing reorder payload with community scope', async () => {
+  const calls = [];
+  const Hierarchy = loadHierarchy((sql, params) => {
+    calls.push({ sql, params });
+    return { rows: [{ id: 1, floor_id: 10, sort_order: 2 }] };
+  });
+
+  const result = await Hierarchy.reorganizeUnits(7, [{ id: 1, sort_order: 2 }]);
+
+  assert.equal(result.updated[0].sort_order, 2);
+  assert.match(calls[0].sql, /SET sort_order = \$2/);
+  assert.match(calls[0].sql, /current_complex\.community_id = \$3/);
+  assert.deepEqual(calls[0].params, [1, 2, 7]);
+});
