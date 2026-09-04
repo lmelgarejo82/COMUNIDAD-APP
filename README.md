@@ -24,7 +24,7 @@ docker compose up -d --build
 | Servicio | URL | Descripción |
 |---|---|---|
 | Frontend | http://localhost:8080 | React SPA servido por Nginx |
-| Backend | http://localhost:3000 | API REST |
+| API | http://localhost:8080/api | API REST vía Nginx |
 | PostgreSQL | localhost:5432 | Base de datos |
 
 El backend espera a que PostgreSQL esté listo, ejecuta las migraciones, y si `SEED_DB=true` (por defecto en docker-compose) ejecuta el seed también.

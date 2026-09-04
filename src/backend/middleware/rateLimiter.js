@@ -16,6 +16,7 @@ function readIntEnv(name, fallback) {
 const RATE_LIMIT_WINDOW_MS = readIntEnv('RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000);
 const RATE_LIMIT_MAX = readIntEnv('RATE_LIMIT_MAX', isProduction ? 300 : 1000);
 const AUTH_RATE_LIMIT_MAX = readIntEnv('AUTH_RATE_LIMIT_MAX', isProduction ? 5 : 20);
+const RATE_LIMIT_VALIDATION = { xForwardedForHeader: false };
 
 if (!isTest && REDIS_URL) {
   const redis = new Redis(REDIS_URL, {
@@ -79,6 +80,7 @@ const globalLimiter = rateLimit({
   max: RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: RATE_LIMIT_VALIDATION,
   handler: createRateLimitHandler('Demasiadas solicitudes. Intentá de nuevo más tarde.'),
   store: createStore('global'),
 });
@@ -88,6 +90,7 @@ const authLimiter = rateLimit({
   max: AUTH_RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: RATE_LIMIT_VALIDATION,
   handler: createRateLimitHandler('Demasiados intentos. Esperá unos minutos antes de volver a intentar.'),
   skipSuccessfulRequests: true,
   store: createStore('auth'),
@@ -98,6 +101,7 @@ const passwordRecoveryLimiter = rateLimit({
   max: AUTH_RATE_LIMIT_MAX,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: RATE_LIMIT_VALIDATION,
   handler: createRateLimitHandler('Demasiados intentos. Esperá unos minutos antes de volver a intentar.'),
   store: createStore('password-recovery'),
 });

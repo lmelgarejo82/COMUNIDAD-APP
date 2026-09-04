@@ -1,4 +1,5 @@
 const LEGACY_JWT_SECRET = 'cambiar-por-secreto-seguro-en-produccion';
+const { isIP } = require('node:net');
 
 function configError(variable, detail) {
   const error = new Error(`${variable} ${detail}`);
@@ -54,11 +55,25 @@ function getPublicAppOrigin(env = process.env) {
   return parsed.origin;
 }
 
+function getTrustProxySetting(env = process.env) {
+  const configured = typeof env.TRUST_PROXY_IP === 'string'
+    ? env.TRUST_PROXY_IP.trim()
+    : '';
+  if (!configured) return false;
+
+  if (!isIP(configured)) {
+    throw configError('TRUST_PROXY_IP', 'debe ser una dirección IP exacta válida');
+  }
+
+  return configured;
+}
+
 function validateSecurityConfig(env = process.env) {
   return Object.freeze({
     jwtSecret: getJwtSecret(env),
     invitationTokenSecret: getInvitationTokenSecret(env),
     publicAppOrigin: getPublicAppOrigin(env),
+    trustProxy: getTrustProxySetting(env),
   });
 }
 
@@ -66,5 +81,6 @@ module.exports = {
   getJwtSecret,
   getInvitationTokenSecret,
   getPublicAppOrigin,
+  getTrustProxySetting,
   validateSecurityConfig,
 };

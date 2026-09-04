@@ -7,6 +7,7 @@ const {
   getJwtSecret,
   getInvitationTokenSecret,
   getPublicAppOrigin,
+  getTrustProxySetting,
   validateSecurityConfig,
 } = require('../config/security');
 
@@ -76,6 +77,20 @@ test('public app URL is normalized to a strict HTTP origin', () => {
   }
 });
 
+test('proxy trust is disabled by default and accepts only an explicit proxy IP', () => {
+  assert.equal(getTrustProxySetting({}), false);
+  assert.equal(getTrustProxySetting({ TRUST_PROXY_IP: '' }), false);
+  assert.equal(getTrustProxySetting({ TRUST_PROXY_IP: '127.0.0.1' }), '127.0.0.1');
+  assert.equal(getTrustProxySetting({ TRUST_PROXY_IP: ' 2001:db8::10 ' }), '2001:db8::10');
+
+  for (const value of ['true', '1', 'frontend', '127.0.0.1/8', '198.51.100.999']) {
+    assert.throws(
+      () => getTrustProxySetting({ TRUST_PROXY_IP: value }),
+      { code: 'SECURITY_CONFIG_INVALID' }
+    );
+  }
+});
+
 test('server fails before listening when production JWT configuration is unsafe', () => {
   for (const jwtSecret of ['', legacySecret]) {
     const result = spawnSync(process.execPath, ['server.js'], {
@@ -134,6 +149,7 @@ test('complete valid security configuration passes without exposing values', () 
       jwtSecret: validSecret,
       invitationTokenSecret: validInvitationSecret,
       publicAppOrigin: 'https://app.example.test',
+      trustProxy: false,
     }
   );
 });

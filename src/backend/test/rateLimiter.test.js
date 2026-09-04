@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
+const { getTrustProxySetting } = require('../config/security');
 
 const limiterPath = require.resolve('../middleware/rateLimiter');
 
@@ -43,6 +44,146 @@ function close(server) {
     server.close((err) => (err ? reject(err) : resolve()));
   });
 }
+
+test('direct requests ignore client-supplied forwarding headers by default', async () => {
+  const app = express();
+  app.set('trust proxy', getTrustProxySetting({}));
+  app.get('/ip', (req, res) => res.json({ ip: req.ip, ips: req.ips }));
+
+  const server = await listen(app);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const response = await fetch(`${baseUrl}/ip`, {
+      headers: { 'X-Forwarded-For': '198.51.100.40' },
+    });
+    const body = await response.json();
+
+    assert.notEqual(body.ip, '198.51.100.40');
+    assert.deepEqual(body.ips, []);
+  } finally {
+    await close(server);
+  }
+});
+
+test('rotating forwarding headers cannot evade the direct-path global limiter', async () => {
+  const { limiters, restore } = loadRateLimiters({ RATE_LIMIT_MAX: '1' });
+  const app = express();
+  app.set('trust proxy', getTrustProxySetting({}));
+  app.use('/api', limiters.globalLimiter);
+  app.get('/api/test', (req, res) => res.json({ ok: true }));
+
+  const server = await listen(app);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    assert.equal((await fetch(`${baseUrl}/api/test`, {
+      headers: { 'X-Forwarded-For': '198.51.100.41' },
+    })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/api/test`, {
+      headers: { 'X-Forwarded-For': '198.51.100.42' },
+    })).status, 429);
+  } finally {
+    await close(server);
+    restore();
+  }
+});
+
+test('direct-path forwarding headers are ignored without client-triggered config diagnostics', async () => {
+  const { limiters, restore } = loadRateLimiters({ RATE_LIMIT_MAX: '1' });
+  const app = express();
+  app.set('trust proxy', getTrustProxySetting({}));
+  app.use('/api', limiters.globalLimiter);
+  app.get('/api/test', (req, res) => res.json({ ok: true }));
+
+  const server = await listen(app);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const originalConsoleError = console.error;
+  const diagnostics = [];
+  console.error = (...args) => diagnostics.push(args);
+
+  try {
+    assert.equal((await fetch(`${baseUrl}/api/test`, {
+      headers: { 'X-Forwarded-For': '198.51.100.43' },
+    })).status, 200);
+    assert.deepEqual(diagnostics, []);
+  } finally {
+    console.error = originalConsoleError;
+    await close(server);
+    restore();
+  }
+});
+
+test('an untrusted direct peer cannot rotate identities when proxy trust is configured', async () => {
+  const { limiters, restore } = loadRateLimiters({ RATE_LIMIT_MAX: '1' });
+  const app = express();
+  app.set('trust proxy', getTrustProxySetting({ TRUST_PROXY_IP: '192.0.2.10' }));
+  app.use('/api', limiters.globalLimiter);
+  app.get('/api/test', (req, res) => res.json({ ok: true }));
+
+  const server = await listen(app);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    assert.equal((await fetch(`${baseUrl}/api/test`, {
+      headers: { 'X-Forwarded-For': '198.51.100.44' },
+    })).status, 200);
+    assert.equal((await fetch(`${baseUrl}/api/test`, {
+      headers: { 'X-Forwarded-For': '198.51.100.45' },
+    })).status, 429);
+  } finally {
+    await close(server);
+    restore();
+  }
+});
+
+test('configured proxy IP produces a stable forwarded client identity', async () => {
+  const { limiters, restore } = loadRateLimiters({ RATE_LIMIT_MAX: '1' });
+  const app = express();
+  app.set('trust proxy', getTrustProxySetting({ TRUST_PROXY_IP: '127.0.0.1' }));
+  app.use('/api', limiters.globalLimiter);
+  app.get('/api/test', (req, res) => res.json({ ip: req.ip, ips: req.ips }));
+
+  const server = await listen(app);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const first = await fetch(`${baseUrl}/api/test`, {
+      headers: { 'X-Forwarded-For': '198.51.100.50, 203.0.113.10' },
+    });
+    assert.equal(first.status, 200);
+    assert.equal((await first.json()).ip, '203.0.113.10');
+
+    const limited = await fetch(`${baseUrl}/api/test`, {
+      headers: { 'X-Forwarded-For': '198.51.100.51, 203.0.113.10' },
+    });
+    assert.equal(limited.status, 429);
+  } finally {
+    await close(server);
+    restore();
+  }
+});
+
+test('health remains outside the global limiter', async () => {
+  const { limiters, restore } = loadRateLimiters({ RATE_LIMIT_MAX: '1' });
+  const app = express();
+  app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+  app.use('/api', limiters.globalLimiter);
+  app.get('/api/test', (req, res) => res.json({ ok: true }));
+
+  const server = await listen(app);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    assert.equal((await fetch(`${baseUrl}/api/test`)).status, 200);
+    assert.equal((await fetch(`${baseUrl}/api/test`)).status, 429);
+    assert.equal((await fetch(`${baseUrl}/api/health`)).status, 200);
+    assert.equal((await fetch(`${baseUrl}/api/health`)).status, 200);
+  } finally {
+    await close(server);
+    restore();
+  }
+});
 
 test('auth limiter keeps failed login attempts rate limited with structured 429 response', async () => {
   const { limiters, restore } = loadRateLimiters({ AUTH_RATE_LIMIT_MAX: '2' });

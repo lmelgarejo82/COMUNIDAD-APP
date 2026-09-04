@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { validateSecurityConfig } = require('./config/security');
-validateSecurityConfig();
+const securityConfig = validateSecurityConfig();
 
 const express = require('express');
 const cors = require('cors');
@@ -36,7 +36,7 @@ const { init: initMasterTicketQueue } = require('./jobs/masterTicketQueue');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.set('trust proxy', 1);
+app.set('trust proxy', securityConfig.trustProxy);
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
