@@ -90,12 +90,12 @@ test('announcement ID reads and mutations bind announcement ID plus community', 
   assert.match(calls[3].sql, /UPDATE announcements/);
 });
 
-test('chat last-paid expense uses community alongside duplicate unit_number', async () => {
+test('chat last-paid expense uses authoritative unit ID alongside community', async () => {
   const calls = [];
   const { ChatContext } = loadModel('../models/ChatContext', async (sql, params) => {
     calls.push({ sql: String(sql), params });
     if (/FROM users/.test(sql)) {
-      return { rows: [{ id: 5, email: 'resident@example.test', role: 'residente', unit_number: 'A-101', community_id: 7 }] };
+      return { rows: [{ id: 5, email: 'resident@example.test', role: 'residente', unit_number: 'A-101', unit_id: 11, community_id: 7 }] };
     }
     if (/AS saldo/.test(sql)) return { rows: [{ saldo: '0', pendientes: '0' }] };
     if (/announcement_reads/.test(sql)) return { rows: [{ count: '0' }] };
@@ -107,5 +107,6 @@ test('chat last-paid expense uses community alongside duplicate unit_number', as
 
   assert.equal(result.context.ultima_expensa_pagada, 'Ninguna');
   assert.match(lastPaid.sql, /e\.community_id\s*=\s*\$2/);
-  assert.deepEqual(lastPaid.params, ['A-101', 7]);
+  assert.match(lastPaid.sql, /ue\.unit_id\s*=\s*\$1/);
+  assert.deepEqual(lastPaid.params, [11, 7]);
 });

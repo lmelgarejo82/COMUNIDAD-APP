@@ -82,6 +82,7 @@ JOIN floors f ON u.floor_id = f.id
 JOIN buildings b ON f.building_id = b.id
 JOIN complexes cx ON b.complex_id = cx.id
 WHERE cx.community_id = $1
+  AND (uo.start_date IS NULL OR uo.start_date <= NOW())
   AND (uo.end_date IS NULL OR uo.end_date > NOW())
 GROUP BY uo.ownership_type
 ORDER BY uo.ownership_type
@@ -107,11 +108,27 @@ ORDER BY year, month_num
 const Dashboard = {
   async residente(userId, communityId) {
     const userQuery = await pool.query(
-      'SELECT unit_number, community_id FROM users WHERE id = $1',
-      [userId]
+      `SELECT un.id AS unit_id, un.unit_code AS unit_number, usr.community_id
+       FROM users usr
+       JOIN unit_ownerships uo ON uo.user_id = usr.id AND uo.unit_id = usr.unit_id
+       JOIN units un ON un.id = uo.unit_id
+       JOIN floors f ON f.id = un.floor_id
+       JOIN buildings b ON b.id = f.building_id
+       JOIN complexes cx ON cx.id = b.complex_id
+       WHERE usr.id = $1
+         AND usr.community_id = $2
+         AND cx.community_id = $2
+         AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+         AND (uo.end_date IS NULL OR uo.end_date > NOW())
+         AND COALESCE(un.is_active, TRUE) = TRUE
+         AND un.deleted_at IS NULL
+         AND f.deleted_at IS NULL
+         AND b.deleted_at IS NULL
+         AND cx.deleted_at IS NULL`,
+      [userId, communityId]
     );
     const user = userQuery.rows[0];
-    if (!user || !user.unit_number || user.community_id !== communityId) {
+    if (!user) {
       return { saldo_pendiente: 0, fecha_vencimiento: null, anuncios: [] };
     }
 
@@ -119,22 +136,22 @@ const Dashboard = {
       `SELECT COALESCE(SUM(ue.amount_owed), 0) AS saldo_pendiente
        FROM unit_expenses ue
        JOIN expenses e ON ue.expense_id = e.id
-       WHERE ue.unit_number = $1
+       WHERE ue.unit_id = $1
          AND e.community_id = $2
          AND ue.status IN ('pending', 'in_review')`,
-      [user.unit_number, communityId]
+      [user.unit_id, communityId]
     );
 
     const vencimientoQuery = await pool.query(
       `SELECT e.due_date
        FROM unit_expenses ue
        JOIN expenses e ON ue.expense_id = e.id
-       WHERE ue.unit_number = $1
+       WHERE ue.unit_id = $1
          AND e.community_id = $2
          AND ue.status IN ('pending', 'in_review')
        ORDER BY e.due_date ASC
        LIMIT 1`,
-      [user.unit_number, communityId]
+      [user.unit_id, communityId]
     );
 
     const anunciosQuery = await pool.query(

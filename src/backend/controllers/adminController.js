@@ -9,50 +9,44 @@ const transporter = nodemailer.createTransport({
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
 });
 
+const VALID_OWNERSHIP_TYPES = new Set(['owner', 'tenant']);
+
 exports.invite = async (req, res) => {
   try {
-    const { email, unit_number, unit_id } = req.body;
+    const { email, unit_id, ownership_type } = req.body;
 
     if (!email) return res.status(400).json({ error: 'email es requerido' });
-
-    let resolvedUnitNumber = unit_number || null;
-    let resolvedUnitId = unit_id || null;
-
-    // If unit_id is provided, resolve unit_number from the units table
-    if (resolvedUnitId) {
-      const { rows } = await pool.query(
-        `SELECT u.id, u.unit_code FROM units u
-         JOIN floors f ON u.floor_id = f.id
-         JOIN buildings b ON f.building_id = b.id
-         JOIN complexes cx ON b.complex_id = cx.id
-         WHERE u.id = $1 AND cx.community_id = $2`,
-        [resolvedUnitId, req.communityId]
-      );
-      if (!rows[0]) return res.status(404).json({ error: 'Unidad no encontrada' });
-      resolvedUnitId = rows[0].id;
-      resolvedUnitNumber = rows[0].unit_code;
-    } else if (resolvedUnitNumber) {
-      // Legacy: resolve unit_id from unit_number if possible
-      const { rows } = await pool.query(
-        `SELECT u.id FROM units u
-         JOIN floors f ON u.floor_id = f.id
-         JOIN buildings b ON f.building_id = b.id
-         JOIN complexes cx ON b.complex_id = cx.id
-         WHERE cx.community_id = $1 AND u.unit_code = $2 LIMIT 1`,
-        [req.communityId, String(resolvedUnitNumber).trim()]
-      );
-      if (rows[0]) resolvedUnitId = rows[0].id;
+    if (!unit_id) return res.status(400).json({ error: 'unit_id es requerido' });
+    if (!VALID_OWNERSHIP_TYPES.has(ownership_type)) {
+      return res.status(400).json({ error: 'ownership_type debe ser owner o tenant' });
     }
 
-    if (!resolvedUnitNumber) return res.status(400).json({ error: 'unit_id o unit_number es requerido' });
+    const { rows } = await pool.query(
+      `SELECT u.id, u.unit_code FROM units u
+       JOIN floors f ON u.floor_id = f.id
+       JOIN buildings b ON f.building_id = b.id
+       JOIN complexes cx ON b.complex_id = cx.id
+       WHERE u.id = $1
+         AND cx.community_id = $2
+         AND COALESCE(u.is_active, TRUE) = TRUE
+         AND u.deleted_at IS NULL
+         AND f.deleted_at IS NULL
+         AND b.deleted_at IS NULL
+         AND cx.deleted_at IS NULL`,
+      [unit_id, req.communityId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Unidad no encontrada' });
+    const resolvedUnitId = rows[0].id;
+    const resolvedUnitNumber = rows[0].unit_code;
 
     const invite = await Invite.create({
       email,
       community_id: req.communityId,
-      unit_number: resolvedUnitNumber,
       unit_id: resolvedUnitId,
+      ownership_type,
       created_by: req.user.id,
     });
+    if (!invite) return res.status(404).json({ error: 'Unidad no encontrada' });
 
     const inviteUrl = `${req.protocol}://${req.get('host')}/register?token=${invite.token}`;
 
@@ -65,13 +59,20 @@ exports.invite = async (req, res) => {
         <p>Hacé clic en el siguiente enlace para registrarte:</p>
         <a href="${inviteUrl}">${inviteUrl}</a>
         <p><strong>Unidad asignada:</strong> ${resolvedUnitNumber}</p>
+        <p><strong>Tipo:</strong> ${ownership_type === 'owner' ? 'Propietario' : 'Inquilino'}</p>
         <p>Este enlace expira en 7 días.</p>
       `,
     });
 
     console.log('Email invitación enviado:', nodemailer.getTestMessageUrl(info));
 
-    res.status(201).json({ message: 'Invitación enviada', token: invite.token, unit_id: resolvedUnitId, unit_number: resolvedUnitNumber });
+    res.status(201).json({
+      message: 'Invitación enviada',
+      token: invite.token,
+      unit_id: resolvedUnitId,
+      unit_number: resolvedUnitNumber,
+      ownership_type,
+    });
   } catch (err) {
     console.error('Error en invite:', err);
     res.status(500).json({ error: 'Error interno del servidor' });

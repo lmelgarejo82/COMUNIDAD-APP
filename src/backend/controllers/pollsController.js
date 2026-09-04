@@ -1,4 +1,5 @@
 const { Poll } = require('../models/Poll');
+const { User } = require('../models/User');
 
 exports.create = async (req, res) => {
   try {
@@ -49,8 +50,7 @@ exports.vote = async (req, res) => {
       return res.status(400).json({ error: 'La votación ya expiró' });
     }
 
-    const user = await require('../models/User').User.findById(req.user.id);
-    if (user.user_type !== 'owner') {
+    if (!(await User.hasActiveOwnership(req.user.id, req.communityId, 'owner'))) {
       return res.status(403).json({ error: 'Solo los propietarios pueden votar' });
     }
 

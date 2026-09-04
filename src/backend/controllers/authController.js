@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const { User, Community } = require('../models/User');
 const { Invite } = require('../models/Invite');
+const { pool } = require('../db');
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
@@ -22,9 +23,75 @@ function generateToken(user) {
   );
 }
 
+function publicRegistrationEnabled() {
+  return process.env.PUBLIC_REGISTRATION_ENABLED === 'true';
+}
+
+async function rollback(client) {
+  try {
+    await client.query('ROLLBACK');
+  } catch (err) {
+    console.error('Error en rollback de registro:', err);
+  }
+}
+
+async function registerFromInvite({ email, password_hash, inviteToken }) {
+  const client = await pool.connect();
+  let transactionOpen = false;
+
+  try {
+    await client.query('BEGIN');
+    transactionOpen = true;
+
+    const invite = await Invite.findForAcceptance(inviteToken, client);
+    if (!invite || invite.email !== email) {
+      await rollback(client);
+      transactionOpen = false;
+      return { status: 400, error: 'Token de invitación inválido o expirado' };
+    }
+
+    const existingUser = await User.findByEmail(email, client);
+    if (existingUser) {
+      await rollback(client);
+      transactionOpen = false;
+      return { status: 409, error: 'El email ya está registrado' };
+    }
+
+    const createdUser = await User.create({
+      email,
+      password_hash,
+      role: 'residente',
+      user_type: invite.ownership_type,
+      unit_number: invite.resolved_unit_number,
+      unit_id: invite.unit_id,
+      community_id: invite.community_id,
+    }, client);
+
+    await client.query(
+      `INSERT INTO unit_ownerships (unit_id, user_id, ownership_type, is_primary, start_date)
+       VALUES ($1, $2, $3, TRUE, NOW())`,
+      [invite.unit_id, createdUser.id, invite.ownership_type]
+    );
+
+    const user = await User.findById(createdUser.id, client);
+    if (!(await Invite.markUsed(invite.id, client))) {
+      throw new Error('INVITE_CONCURRENTLY_CONSUMED');
+    }
+
+    await client.query('COMMIT');
+    transactionOpen = false;
+    return { user };
+  } catch (err) {
+    if (transactionOpen) await rollback(client);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 exports.register = async (req, res) => {
   try {
-    const { email, password, access_code, unit_number, inviteToken } = req.body;
+    const { email, password, access_code, inviteToken } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email y password son requeridos' });
@@ -34,50 +101,48 @@ exports.register = async (req, res) => {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     }
 
-    const existingUser = await User.findByEmail(email);
-    if (existingUser) {
-      return res.status(409).json({ error: 'El email ya está registrado' });
-    }
-
-    let communityId;
-    let assignedUnit = unit_number || null;
-
-    // Registro con token de invitación (multi-tenant profesional)
+    let user;
     if (inviteToken) {
-      const invite = await Invite.findByToken(inviteToken);
-      if (!invite) {
-        return res.status(400).json({ error: 'Token de invitación inválido o expirado' });
+      const password_hash = await bcrypt.hash(password, 10);
+      const result = await registerFromInvite({ email, password_hash, inviteToken });
+      if (result.error) return res.status(result.status).json({ error: result.error });
+      user = result.user;
+    } else {
+      if (!publicRegistrationEnabled()) {
+        return res.status(403).json({ error: 'El registro público está deshabilitado' });
       }
-      if (invite.email !== email) {
-        return res.status(400).json({ error: 'El email no coincide con la invitación' });
+      if (!access_code) {
+        return res.status(400).json({ error: 'Código de acceso requerido' });
       }
-      communityId = invite.community_id;
-      assignedUnit = invite.unit_number;
-      await Invite.markUsed(inviteToken);
-    } else if (access_code) {
-      // Registro con código de acceso (legacy)
+
+      const existingUser = await User.findByEmail(email);
+      if (existingUser) {
+        return res.status(409).json({ error: 'El email ya está registrado' });
+      }
+
       const community = await Community.findByAccessCode(access_code);
       if (!community) {
         return res.status(404).json({ error: 'Código de acceso inválido' });
       }
-      communityId = community.id;
-    } else {
-      return res.status(400).json({ error: 'Token de invitación o código de acceso son requeridos' });
-    }
 
-    const password_hash = await bcrypt.hash(password, 10);
-    const user = await User.create({
-      email,
-      password_hash,
-      role: 'residente',
-      user_type: req.body.user_type || 'owner',
-      unit_number: assignedUnit,
-      community_id: communityId,
-    });
+      const password_hash = await bcrypt.hash(password, 10);
+      user = await User.create({
+        email,
+        password_hash,
+        role: 'residente',
+        user_type: null,
+        unit_number: null,
+        unit_id: null,
+        community_id: community.id,
+      });
+    }
 
     const token = generateToken(user);
     res.status(201).json({ user, token });
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'El email ya está registrado' });
+    }
     console.error('Error en register:', err);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
@@ -101,8 +166,8 @@ exports.login = async (req, res) => {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
-    const token = generateToken(user);
-    const { password_hash, reset_token, reset_token_expires, ...safeUser } = user;
+    const safeUser = await User.findById(user.id);
+    const token = generateToken(safeUser || user);
     res.json({ user: safeUser, token });
   } catch (err) {
     console.error('Error en login:', err);

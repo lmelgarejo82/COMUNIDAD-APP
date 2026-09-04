@@ -381,7 +381,10 @@ const Hierarchy = {
     const { rows: depCount } = await db.query(
       `SELECT
          (SELECT COUNT(*) FROM unit_expenses WHERE unit_id = $1) +
-         (SELECT COUNT(*) FROM unit_ownerships WHERE unit_id = $1 AND end_date IS NULL) +
+         (SELECT COUNT(*) FROM unit_ownerships
+          WHERE unit_id = $1
+            AND (start_date IS NULL OR start_date <= NOW())
+            AND (end_date IS NULL OR end_date > NOW())) +
          (SELECT COUNT(*) FROM tickets WHERE unit_id = $1 AND status IN ('sent','in_progress')) AS cnt`, [id]
     );
     if (parseInt(depCount[0].cnt) > 0) {
@@ -565,7 +568,9 @@ const Hierarchy = {
        JOIN floors f ON u.floor_id = f.id
        JOIN buildings b ON f.building_id = b.id
        JOIN complexes cx ON b.complex_id = cx.id
-       WHERE uo.user_id = $1 AND (uo.end_date IS NULL OR uo.end_date > NOW())
+       WHERE uo.user_id = $1
+         AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+         AND (uo.end_date IS NULL OR uo.end_date > NOW())
        ORDER BY uo.is_primary DESC, uo.start_date DESC LIMIT 1`,
       [userId]
     );
@@ -577,7 +582,9 @@ const Hierarchy = {
     const { rows } = await db.query(
       `SELECT uo.*, u.email, u.user_type, u.role, u.unit_number
        FROM unit_ownerships uo JOIN users u ON uo.user_id = u.id
-       WHERE uo.unit_id = $1 AND (uo.end_date IS NULL OR uo.end_date > NOW())
+       WHERE uo.unit_id = $1
+         AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+         AND (uo.end_date IS NULL OR uo.end_date > NOW())
        ORDER BY uo.is_primary DESC, uo.start_date DESC`, [unitId]
     );
     return rows;

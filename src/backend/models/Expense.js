@@ -150,29 +150,16 @@ const Expense = {
     return rows;
   },
 
-  async findMyUnitExpenses(unit_number, community_id) {
-    if (USE_HIERARCHY) {
-      const unitId = await Hierarchy.resolveUnitId(community_id, unit_number);
-      if (!unitId) return [];
-      const { rows } = await pool.query(
-        `SELECT ue.*, e.description, e.due_date, e.period, e.fixed_amount, e.extra_amount,
-                e.late_fee_percent, e.grace_days
-         FROM unit_expenses ue
-         JOIN expenses e ON ue.expense_id = e.id
-         WHERE ue.unit_id = $1 AND e.community_id = $2 AND e.deleted_at IS NULL
-         ORDER BY e.due_date DESC`,
-        [unitId, community_id]
-      );
-      return rows;
-    }
+  async findMyUnitExpenses(unitId, community_id) {
+    if (!unitId) return [];
     const { rows } = await pool.query(
       `SELECT ue.*, e.description, e.due_date, e.period, e.fixed_amount, e.extra_amount,
               e.late_fee_percent, e.grace_days
        FROM unit_expenses ue
        JOIN expenses e ON ue.expense_id = e.id
-       WHERE ue.unit_number = $1 AND e.community_id = $2 AND e.deleted_at IS NULL
+       WHERE ue.unit_id = $1 AND e.community_id = $2 AND e.deleted_at IS NULL
        ORDER BY e.due_date DESC`,
-      [unit_number, community_id]
+      [unitId, community_id]
     );
     return rows;
   },
@@ -196,15 +183,13 @@ const Expense = {
          AND e.community_id = $3
          AND u.community_id = e.community_id
          AND e.deleted_at IS NULL
-         AND (
-           (ue.unit_id IS NOT NULL AND EXISTS (
-             SELECT 1
-             FROM unit_ownerships uo
-             WHERE uo.unit_id = ue.unit_id
-               AND uo.user_id = u.id
-               AND (uo.end_date IS NULL OR uo.end_date > NOW())
-           ))
-           OR (ue.unit_id IS NULL AND u.unit_number = ue.unit_number)
+         AND EXISTS (
+           SELECT 1
+           FROM unit_ownerships uo
+           WHERE uo.unit_id = ue.unit_id
+             AND uo.user_id = u.id
+             AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+             AND (uo.end_date IS NULL OR uo.end_date > NOW())
          )`,
       [id, userId, communityId]
     );
@@ -245,15 +230,13 @@ const Expense = {
        JOIN expenses e ON ue.expense_id = e.id
        JOIN users u ON u.community_id = e.community_id
        WHERE ue.id = $1
-         AND (
-           (ue.unit_id IS NOT NULL AND EXISTS (
-             SELECT 1
-             FROM unit_ownerships uo
-             WHERE uo.unit_id = ue.unit_id
-               AND uo.user_id = u.id
-               AND (uo.end_date IS NULL OR uo.end_date > NOW())
-           ))
-           OR (ue.unit_id IS NULL AND u.unit_number = ue.unit_number)
+         AND EXISTS (
+           SELECT 1
+           FROM unit_ownerships uo
+           WHERE uo.unit_id = ue.unit_id
+             AND uo.user_id = u.id
+             AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+             AND (uo.end_date IS NULL OR uo.end_date > NOW())
          )
        ORDER BY u.id
        LIMIT 1`,
@@ -266,28 +249,16 @@ const Expense = {
     const targetDate = new Date();
     targetDate.setDate(targetDate.getDate() + daysFromNow);
 
-    if (USE_HIERARCHY) {
-      const { rows } = await pool.query(
-        `SELECT ue.*, e.description, e.due_date, e.late_fee_percent, e.grace_days,
-                u.email AS user_email, u.unit_number
-         FROM unit_expenses ue
-         JOIN expenses e ON ue.expense_id = e.id
-         JOIN unit_ownerships uo ON uo.unit_id = ue.unit_id AND (uo.end_date IS NULL OR uo.end_date > NOW())
-         JOIN users u ON uo.user_id = u.id
-         WHERE e.due_date::date = $1::date
-           AND ue.status IN ('pending', 'in_review')
-           AND e.deleted_at IS NULL`,
-        [targetDate.toISOString().split('T')[0]]
-      );
-      return rows;
-    }
-
     const { rows } = await pool.query(
       `SELECT ue.*, e.description, e.due_date, e.late_fee_percent, e.grace_days,
-              u.email AS user_email, u.unit_number
+              usr.id AS user_id, usr.email AS user_email, un.unit_code AS unit_number
        FROM unit_expenses ue
        JOIN expenses e ON ue.expense_id = e.id
-       JOIN users u ON u.unit_number = ue.unit_number AND u.community_id = e.community_id
+       JOIN unit_ownerships uo ON uo.unit_id = ue.unit_id
+         AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+         AND (uo.end_date IS NULL OR uo.end_date > NOW())
+       JOIN users usr ON usr.id = uo.user_id AND usr.community_id = e.community_id
+       JOIN units un ON un.id = uo.unit_id
        WHERE e.due_date::date = $1::date
          AND ue.status IN ('pending', 'in_review')
          AND e.deleted_at IS NULL`,
@@ -300,28 +271,16 @@ const Expense = {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
 
-    if (USE_HIERARCHY) {
-      const { rows } = await pool.query(
-        `SELECT ue.*, e.description, e.due_date, e.late_fee_percent, e.grace_days,
-                u.email AS user_email, u.unit_number
-         FROM unit_expenses ue
-         JOIN expenses e ON ue.expense_id = e.id
-         JOIN unit_ownerships uo ON uo.unit_id = ue.unit_id AND (uo.end_date IS NULL OR uo.end_date > NOW())
-         JOIN users u ON uo.user_id = u.id
-         WHERE e.due_date::date = $1::date
-           AND ue.status IN ('pending', 'in_review')
-           AND e.deleted_at IS NULL`,
-        [yesterday.toISOString().split('T')[0]]
-      );
-      return rows;
-    }
-
     const { rows } = await pool.query(
       `SELECT ue.*, e.description, e.due_date, e.late_fee_percent, e.grace_days,
-              u.email AS user_email, u.unit_number
+              usr.id AS user_id, usr.email AS user_email, un.unit_code AS unit_number
        FROM unit_expenses ue
        JOIN expenses e ON ue.expense_id = e.id
-       JOIN users u ON u.unit_number = ue.unit_number AND u.community_id = e.community_id
+       JOIN unit_ownerships uo ON uo.unit_id = ue.unit_id
+         AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+         AND (uo.end_date IS NULL OR uo.end_date > NOW())
+       JOIN users usr ON usr.id = uo.user_id AND usr.community_id = e.community_id
+       JOIN units un ON un.id = uo.unit_id
        WHERE e.due_date::date = $1::date
          AND ue.status IN ('pending', 'in_review')
          AND e.deleted_at IS NULL`,

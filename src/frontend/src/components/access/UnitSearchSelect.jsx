@@ -2,7 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import t from '../../theme';
 import { hierarchyService } from '../../services/hierarchy';
 
-export default function UnitSearchSelect({ value, selectedUnitId, onManualChange, onSelect, onClear }) {
+export default function UnitSearchSelect({
+  value,
+  selectedUnitId,
+  onManualChange,
+  onSelect,
+  onClear,
+  allowManual = true,
+  label = 'Unidad o destino',
+  placeholder = 'Buscar unidad o escribir destino manual',
+}) {
   const [query, setQuery] = useState(value || '');
   const [options, setOptions] = useState([]);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -103,14 +112,14 @@ export default function UnitSearchSelect({ value, selectedUnitId, onManualChange
 
   return (
     <div style={{ display: 'block', position: 'relative' }}>
-      <span style={t.font.label}>Unidad o destino</span>
+      <span style={t.font.label}>{label}</span>
       <div style={{ display: 'flex', gap: '0.4rem' }}>
         <input
           value={query}
           onFocus={() => setOpen(true)}
           onChange={(e) => handleInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Buscar unidad o escribir destino manual"
+          placeholder={placeholder}
           style={{ ...t.input, marginBottom: 0 }}
         />
         {(selectedUnitId || query) && (
@@ -121,14 +130,20 @@ export default function UnitSearchSelect({ value, selectedUnitId, onManualChange
       </div>
 
       <div style={{ fontSize: '0.74rem', color: selectedUnitId ? t.colors.success : t.colors.textSecondary, marginTop: '0.28rem', fontWeight: selectedUnitId ? 700 : 500 }}>
-        {selectedUnitId ? 'Unidad seleccionada del sistema' : 'Destino manual, sin unidad del sistema seleccionada'}
+        {selectedUnitId
+          ? 'Unidad seleccionada del sistema'
+          : allowManual ? 'Destino manual, sin unidad del sistema seleccionada' : 'Seleccioná una unidad del sistema'}
       </div>
 
       {open && (
         <div style={styles.dropdown}>
           {loading && <div style={styles.state}>Buscando unidades...</div>}
           {!loading && error && <div style={{ ...styles.state, color: t.colors.danger }}>{error}</div>}
-          {!loading && !error && options.length === 0 && <div style={styles.state}>No se encontraron unidades. Podés usar destino manual si corresponde.</div>}
+          {!loading && !error && options.length === 0 && (
+            <div style={styles.state}>
+              {allowManual ? 'No se encontraron unidades. Podés usar destino manual si corresponde.' : 'No se encontraron unidades.'}
+            </div>
+          )}
           {!loading && !error && options.map((unit, index) => (
             <button
               key={unit.unit_id}

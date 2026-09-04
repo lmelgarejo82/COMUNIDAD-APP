@@ -41,7 +41,7 @@ function createResponse() {
 function loadPollController(pollImpl) {
   clear([pollControllerPath, pollPath, userPath]);
   mockModule(pollPath, { Poll: pollImpl });
-  mockModule(userPath, { User: { findById: async () => ({ id: 5, user_type: 'owner' }) } });
+  mockModule(userPath, { User: { hasActiveOwnership: async () => true } });
   return require('../controllers/pollsController');
 }
 
@@ -296,7 +296,7 @@ function loadAdminController({ onQuery, inviteImpl }) {
 
 function inviteRequest(unitId) {
   return {
-    body: { email: 'invitee@example.test', unit_id: unitId },
+    body: { email: 'invitee@example.test', unit_id: unitId, ownership_type: 'owner' },
     user: { id: 2 },
     communityId: 7,
     protocol: 'http',
@@ -329,6 +329,7 @@ test('admin invites a unit from req.communityId without a second mutation', asyn
   assert.equal(queries.length, 1);
   assert.equal(created.unit_id, 11);
   assert.equal(created.community_id, 7);
+  assert.equal(created.ownership_type, 'owner');
 });
 
 test('admin cannot invite a valid unit from another community', async () => {
@@ -351,5 +352,30 @@ test('admin cannot invite a valid unit from another community', async () => {
 
   assert.equal(res.statusCode, 404);
   assert.deepEqual(res.body, { error: 'Unidad no encontrada' });
+  assert.equal(created, false);
+});
+
+test('admin invitation requires an explicit ownership type before unit lookup', async () => {
+  let queried = false;
+  let created = false;
+  const { invite } = loadAdminController({
+    async onQuery() {
+      queried = true;
+      return { rows: [{ id: 11, unit_code: 'A-101' }] };
+    },
+    inviteImpl: {
+      async create() {
+        created = true;
+      },
+    },
+  });
+  const req = inviteRequest(11);
+  delete req.body.ownership_type;
+  const res = createResponse();
+
+  await invite(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(queried, false);
   assert.equal(created, false);
 });

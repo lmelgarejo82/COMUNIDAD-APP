@@ -60,6 +60,7 @@ async function masterTicketProcessor(masterId) {
          JOIN users us ON uo.user_id = us.id
          WHERE uo.unit_id = $1
            AND us.community_id = $2
+           AND (uo.start_date IS NULL OR uo.start_date <= NOW())
            AND (uo.end_date IS NULL OR uo.end_date > NOW())
          ORDER BY uo.is_primary DESC
          LIMIT 1`,

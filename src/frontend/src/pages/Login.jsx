@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getErrorMessage } from '../services/errors';
 
+const PUBLIC_REGISTRATION_ENABLED = import.meta.env.VITE_PUBLIC_REGISTRATION_ENABLED === 'true';
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,9 +35,9 @@ export default function Login() {
         <button type="submit" disabled={loading} style={styles.button}>
           {loading ? 'Ingresando...' : 'Ingresar'}
         </button>
-        <p style={styles.link}>
-          ¿No tenés cuenta? <Link to="/register">Registrate acá</Link>
-        </p>
+        {PUBLIC_REGISTRATION_ENABLED
+          ? <p style={styles.link}>¿No tenés cuenta? <Link to="/register">Registrate acá</Link></p>
+          : <p style={styles.link}>¿No tenés cuenta? Pedí una invitación al administrador.</p>}
       </form>
     </div>
   );

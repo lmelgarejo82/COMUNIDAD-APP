@@ -260,10 +260,10 @@ exports.confirmPayment = async (req, res) => {
 exports.myExpenses = async (req, res) => {
   try {
     const user = await require('../models/User').User.findById(req.user.id);
-    if (!user || user.community_id !== req.communityId || !user.unit_number) {
+    if (!user || user.community_id !== req.communityId || !user.unit_id) {
       return res.status(404).json({ error: 'Usuario sin unidad asignada' });
     }
-    const expenses = await Expense.findMyUnitExpenses(user.unit_number, req.communityId);
+    const expenses = await Expense.findMyUnitExpenses(user.unit_id, req.communityId);
 
     const now = new Date();
     const result = expenses.map((item) => {

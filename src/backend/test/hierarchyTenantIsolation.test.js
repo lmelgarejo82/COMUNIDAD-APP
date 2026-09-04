@@ -228,8 +228,12 @@ test('assignment allows a user and unit from req.communityId and commits both wr
     ['BEGIN', 'COMMIT']
   );
   const userUpdate = pool.commands.find(command => /UPDATE users\s+SET unit_id/.test(command.sql));
+  const accessCheck = pool.commands.find(command => /SELECT u\.id AS unit_id/.test(command.sql));
+  assert.match(accessCheck.sql, /COALESCE\(u\.is_active, TRUE\) = TRUE/);
+  assert.match(accessCheck.sql, /u\.deleted_at IS NULL/);
   assert.match(userUpdate.sql, /community_id = \$3/);
-  assert.deepEqual(userUpdate.params, [1, 5, 7]);
+  assert.match(userUpdate.sql, /user_type = \$4/);
+  assert.deepEqual(userUpdate.params, [1, 5, 7, 'owner']);
 });
 
 test('assignment rejects a valid user from another community before writing', async () => {
@@ -237,7 +241,7 @@ test('assignment rejects a valid user from another community before writing', as
   const { assignUnit } = loadController({ pool });
   const res = createResponse();
 
-  await assignUnit({ communityId: 7, body: { unit_id: 1, user_id: 55 } }, res);
+  await assignUnit({ communityId: 7, body: { unit_id: 1, user_id: 55, ownership_type: 'owner' } }, res);
 
   assert.equal(res.statusCode, 403);
   assert.equal(pool.commands.some(command => /INSERT INTO unit_ownerships/.test(command.sql)), false);
@@ -256,7 +260,7 @@ test('assignment rolls back the ownership when the user synchronization fails', 
   console.error = () => {};
 
   try {
-    await assignUnit({ communityId: 7, body: { unit_id: 1, user_id: 5 } }, res);
+    await assignUnit({ communityId: 7, body: { unit_id: 1, user_id: 5, ownership_type: 'owner' } }, res);
   } finally {
     console.error = originalError;
   }
@@ -268,31 +272,51 @@ test('assignment rolls back the ownership when the user synchronization fails', 
   );
 });
 
-test('ending an assignment scopes the update through the unit community', async () => {
+test('assignment requires explicit ownership type before opening a transaction', async () => {
+  const pool = assignmentPool({ accessRows: [{ unit_id: 1, user_id: 5 }] });
+  const { assignUnit } = loadController({ pool });
+  const res = createResponse();
+
+  await assignUnit({ communityId: 7, body: { unit_id: 1, user_id: 5 } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(pool.commands.length, 0);
+});
+
+function endAssignmentPool(rows, remainingRows = []) {
   const calls = [];
-  const pool = {
+  const client = {
     async query(sql, params) {
-      calls.push({ sql, params });
-      return { rows: [{ id: 501, unit_id: 1, user_id: 5, is_primary: false }] };
+      calls.push({ sql: String(sql).trim(), params });
+      if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(String(sql).trim())) return { rows: [] };
+      if (/UPDATE unit_ownerships/.test(sql)) return { rows };
+      if (/SELECT un\.id AS unit_id/.test(sql)) return { rows: remainingRows };
+      if (/UPDATE users\s+SET unit_id = \$1/.test(sql)) return { rows: [] };
+      throw new Error(`unexpected query: ${sql}`);
     },
+    release() { calls.push({ sql: 'RELEASE' }); },
   };
+  return { calls, async connect() { return client; } };
+}
+
+test('ending an assignment scopes the update and clears the compatibility mirror atomically', async () => {
+  const pool = endAssignmentPool([{ id: 501, unit_id: 1, user_id: 5, is_primary: false }]);
   const { endAssignment } = loadController({ pool });
   const res = createResponse();
 
   await endAssignment({ params: { id: '501' }, communityId: 7 }, res);
 
   assert.equal(res.statusCode, 200);
-  assert.match(calls[0].sql, /cx\.community_id = \$2/);
-  assert.deepEqual(calls[0].params, [501, 7]);
+  const ownershipUpdate = pool.calls.find(call => /UPDATE unit_ownerships/.test(call.sql));
+  const userUpdate = pool.calls.find(call => /UPDATE users\s+SET unit_id = \$1/.test(call.sql));
+  assert.match(ownershipUpdate.sql, /cx\.community_id = \$2/);
+  assert.deepEqual(ownershipUpdate.params, [501, 7]);
+  assert.deepEqual(userUpdate.params, [null, null, null, 5, 1, 7]);
+  assert.deepEqual(pool.calls.filter(call => ['BEGIN', 'COMMIT', 'ROLLBACK'].includes(call.sql)).map(call => call.sql), ['BEGIN', 'COMMIT']);
 });
 
 test('ending a valid assignment from another community returns the existing safe 404', async () => {
-  const pool = {
-    async query(sql, params) {
-      const scoped = /cx\.community_id = \$2/.test(sql) && params[1] === 7;
-      return { rows: scoped ? [] : [{ id: 777, unit_id: 99, user_id: 55 }] };
-    },
-  };
+  const pool = endAssignmentPool([]);
   const { endAssignment } = loadController({ pool });
   const res = createResponse();
 
@@ -300,4 +324,23 @@ test('ending a valid assignment from another community returns the existing safe
 
   assert.equal(res.statusCode, 404);
   assert.deepEqual(res.body, { error: 'Asignación no encontrada o ya finalizada' });
+  assert.deepEqual(pool.calls.filter(call => ['BEGIN', 'COMMIT', 'ROLLBACK'].includes(call.sql)).map(call => call.sql), ['BEGIN', 'ROLLBACK']);
+});
+
+test('ending the mirrored assignment promotes the existing active ownership', async () => {
+  const pool = endAssignmentPool(
+    [{ id: 501, unit_id: 1, user_id: 5, is_primary: false }],
+    [{ unit_id: 2, unit_code: 'B-202', ownership_type: 'tenant' }]
+  );
+  const { endAssignment } = loadController({ pool });
+  const res = createResponse();
+
+  await endAssignment({ params: { id: '501' }, communityId: 7 }, res);
+
+  const userUpdate = pool.calls.find(call => /UPDATE users\s+SET unit_id = \$1/.test(call.sql));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(userUpdate.params, [2, 'B-202', 'tenant', 5, 1, 7]);
+  const remainingLookup = pool.calls.find(call => /SELECT un\.id AS unit_id/.test(call.sql));
+  assert.match(remainingLookup.sql, /uo\.start_date IS NULL OR uo\.start_date <= NOW\(\)/);
+  assert.match(remainingLookup.sql, /ORDER BY uo\.is_primary DESC, uo\.start_date DESC NULLS LAST, uo\.id DESC/);
 });

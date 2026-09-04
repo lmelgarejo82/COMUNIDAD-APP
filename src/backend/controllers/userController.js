@@ -14,7 +14,11 @@ exports.me = async (req, res) => {
 
 exports.updateMe = async (req, res) => {
   try {
-    const { email, currentPassword, newPassword, unit_number } = req.body;
+    const { email, currentPassword, newPassword } = req.body;
+    const trustedFields = ['unit_number', 'unit_id', 'user_type', 'ownership_type', 'role', 'community_id', 'communityId'];
+    if (trustedFields.some(field => Object.prototype.hasOwnProperty.call(req.body, field))) {
+      return res.status(400).json({ error: 'Los datos de membresía no se pueden modificar desde el perfil' });
+    }
 
     const user = await User.findByEmail(req.user.email);
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
@@ -24,9 +28,7 @@ exports.updateMe = async (req, res) => {
       if (existing && existing.id !== user.id) {
         return res.status(409).json({ error: 'El email ya está en uso' });
       }
-      await User.updateProfile(user.id, { email, unit_number: unit_number || user.unit_number });
-    } else if (unit_number) {
-      await User.updateProfile(user.id, { unit_number });
+      await User.updateProfile(user.id, { email });
     }
 
     if (newPassword) {

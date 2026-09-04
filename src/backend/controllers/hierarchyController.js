@@ -717,6 +717,9 @@ exports.assignUnit = async (req, res) => {
   try {
     const { unit_id, user_id, ownership_type, start_date } = req.body;
     if (!unit_id || !user_id) return res.status(400).json({ error: 'unit_id y user_id son requeridos' });
+    if (!['owner', 'tenant'].includes(ownership_type)) {
+      return res.status(400).json({ error: 'ownership_type debe ser owner o tenant' });
+    }
     client = await pool.connect();
     await client.query('BEGIN');
 
@@ -727,7 +730,13 @@ exports.assignUnit = async (req, res) => {
        JOIN buildings b ON f.building_id = b.id
        JOIN complexes cx ON b.complex_id = cx.id
        JOIN users usr ON usr.id = $2 AND usr.community_id = cx.community_id
-       WHERE u.id = $1 AND cx.community_id = $3
+       WHERE u.id = $1
+         AND cx.community_id = $3
+         AND COALESCE(u.is_active, TRUE) = TRUE
+         AND u.deleted_at IS NULL
+         AND f.deleted_at IS NULL
+         AND b.deleted_at IS NULL
+         AND cx.deleted_at IS NULL
        FOR UPDATE OF u, f, b, cx, usr`,
       [parseInt(unit_id), parseInt(user_id), req.communityId]
     );
@@ -742,16 +751,18 @@ exports.assignUnit = async (req, res) => {
        ON CONFLICT (unit_id, user_id) DO UPDATE
          SET ownership_type = $3, start_date = $4, end_date = NULL, is_primary = TRUE
        RETURNING *`,
-      [unit_id, user_id, ownership_type || 'owner', start_date || new Date().toISOString()]
+      [unit_id, user_id, ownership_type, start_date || new Date().toISOString()]
     );
 
     // Also update user's unit_id
     const { rows: userRows } = await client.query(
       `UPDATE users
-       SET unit_id = $1, unit_number = (SELECT unit_code FROM units WHERE id = $1)
+       SET unit_id = $1,
+           unit_number = (SELECT unit_code FROM units WHERE id = $1),
+           user_type = $4
        WHERE id = $2 AND community_id = $3
        RETURNING id`,
-      [unit_id, user_id, req.communityId]
+      [unit_id, user_id, req.communityId, ownership_type]
     );
     if (!userRows[0]) throw new Error('USER_SCOPE_CHANGED');
 
@@ -768,12 +779,15 @@ exports.assignUnit = async (req, res) => {
 };
 
 exports.endAssignment = async (req, res) => {
+  let client;
   try {
     const { id } = req.params;
-    const { rows } = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const { rows } = await client.query(
       `UPDATE unit_ownerships uo SET end_date = NOW(), is_primary = FALSE
        WHERE uo.id = $1
-         AND uo.end_date IS NULL
+         AND (uo.end_date IS NULL OR uo.end_date > NOW())
          AND EXISTS (
            SELECT 1
            FROM units u
@@ -785,10 +799,52 @@ exports.endAssignment = async (req, res) => {
        RETURNING uo.*`,
       [parseInt(id), req.communityId]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Asignación no encontrada o ya finalizada' });
+    if (!rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Asignación no encontrada o ya finalizada' });
+    }
+    const { rows: remainingRows } = await client.query(
+      `SELECT un.id AS unit_id, un.unit_code, uo.ownership_type
+       FROM unit_ownerships uo
+       JOIN units un ON un.id = uo.unit_id
+       JOIN floors f ON f.id = un.floor_id
+       JOIN buildings b ON b.id = f.building_id
+       JOIN complexes cx ON cx.id = b.complex_id
+       WHERE uo.user_id = $1
+         AND uo.id <> $2
+         AND cx.community_id = $3
+         AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+         AND (uo.end_date IS NULL OR uo.end_date > NOW())
+         AND COALESCE(un.is_active, TRUE) = TRUE
+         AND un.deleted_at IS NULL
+         AND f.deleted_at IS NULL
+         AND b.deleted_at IS NULL
+         AND cx.deleted_at IS NULL
+       ORDER BY uo.is_primary DESC, uo.start_date DESC NULLS LAST, uo.id DESC
+       LIMIT 1`,
+      [rows[0].user_id, rows[0].id, req.communityId]
+    );
+    const remaining = remainingRows[0] || null;
+    await client.query(
+      `UPDATE users
+       SET unit_id = $1, unit_number = $2, user_type = $3
+       WHERE id = $4 AND unit_id = $5 AND community_id = $6`,
+      [
+        remaining?.unit_id || null,
+        remaining?.unit_code || null,
+        remaining?.ownership_type || null,
+        rows[0].user_id,
+        rows[0].unit_id,
+        req.communityId,
+      ]
+    );
+    await client.query('COMMIT');
     res.json(rows[0]);
   } catch (err) {
+    if (client) await client.query('ROLLBACK');
     console.error('Error en endAssignment:', err);
     res.status(500).json({ error: err.message });
+  } finally {
+    if (client) client.release();
   }
 };

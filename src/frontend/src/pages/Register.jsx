@@ -3,11 +3,13 @@ import { Link, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { getErrorMessage } from '../services/errors';
 
+const PUBLIC_REGISTRATION_ENABLED = import.meta.env.VITE_PUBLIC_REGISTRATION_ENABLED === 'true';
+
 export default function Register() {
   const [searchParams] = useSearchParams();
   const inviteToken = searchParams.get('token');
   const [form, setForm] = useState({
-    email: '', password: '', access_code: '', unit_number: '', inviteToken: inviteToken || '', user_type: 'owner',
+    email: '', password: '', access_code: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,9 +23,9 @@ export default function Register() {
     setError('');
     setLoading(true);
     try {
-      const body = { ...form };
-      if (inviteToken) body.inviteToken = inviteToken;
-      if (!inviteToken) delete body.inviteToken;
+      const body = inviteToken
+        ? { email: form.email, password: form.password, inviteToken }
+        : { email: form.email, password: form.password, access_code: form.access_code };
       const { data } = await api.post('/auth/register', body);
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
@@ -33,6 +35,18 @@ export default function Register() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (!inviteToken && !PUBLIC_REGISTRATION_ENABLED) {
+    return (
+      <div style={styles.wrapper}>
+        <div style={styles.card}>
+          <h1 style={styles.title}>Registro por invitación</h1>
+          <p style={styles.info}>Solicitá una invitación al administrador de tu comunidad.</p>
+          <p style={styles.link}><Link to="/login">Volver al ingreso</Link></p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -48,31 +62,16 @@ export default function Register() {
 
         {error && <p style={styles.error}>{error}</p>}
 
-        <label style={styles.label}>Tipo de usuario</label>
-        <select name="user_type" value={form.user_type} onChange={handleChange} style={{ ...styles.input, padding: '0.65rem' }}>
-          <option value="owner">Propietario</option>
-          <option value="tenant">Inquilino</option>
-        </select>
-
         <label style={styles.label}>Email</label>
         <input type="email" name="email" value={form.email} onChange={handleChange} required style={styles.input} />
 
         <label style={styles.label}>Contraseña</label>
         <input type="password" name="password" value={form.password} onChange={handleChange} required minLength={6} style={styles.input} />
 
-        {inviteToken && (
-          <>
-            <label style={styles.label}>N° de unidad</label>
-            <input type="text" name="unit_number" value={form.unit_number} onChange={handleChange} style={styles.input} placeholder="Asignado por invitación" />
-          </>
-        )}
-
         {!inviteToken && (
           <>
             <label style={styles.label}>Código de acceso</label>
             <input type="text" name="access_code" value={form.access_code} onChange={handleChange} required style={styles.input} placeholder="DEMO2024" />
-            <label style={styles.label}>N° de unidad (opcional)</label>
-            <input type="text" name="unit_number" value={form.unit_number} onChange={handleChange} style={styles.input} placeholder="1A" />
           </>
         )}
 

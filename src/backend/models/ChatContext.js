@@ -3,7 +3,28 @@ const { pool } = require('../db');
 const ChatContext = {
   async build(userId) {
     const userQuery = await pool.query(
-      'SELECT id, email, role, unit_number, community_id FROM users WHERE id = $1', [userId]
+      `SELECT usr.id, usr.email, usr.role, active.unit_number, active.unit_id, usr.community_id
+       FROM users usr
+       LEFT JOIN LATERAL (
+         SELECT un.id AS unit_id, un.unit_code AS unit_number
+         FROM unit_ownerships uo
+         JOIN units un ON un.id = uo.unit_id
+         JOIN floors f ON f.id = un.floor_id
+         JOIN buildings b ON b.id = f.building_id
+         JOIN complexes cx ON cx.id = b.complex_id
+         WHERE uo.user_id = usr.id
+           AND uo.unit_id = usr.unit_id
+           AND cx.community_id = usr.community_id
+           AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+           AND (uo.end_date IS NULL OR uo.end_date > NOW())
+           AND COALESCE(un.is_active, TRUE) = TRUE
+           AND un.deleted_at IS NULL
+           AND f.deleted_at IS NULL
+           AND b.deleted_at IS NULL
+           AND cx.deleted_at IS NULL
+         LIMIT 1
+       ) active ON TRUE
+       WHERE usr.id = $1`, [userId]
     );
     const user = userQuery.rows[0];
     if (!user) return { user: null, context: '' };
@@ -12,17 +33,17 @@ const ChatContext = {
     const saldoQuery = await pool.query(
       `SELECT COALESCE(SUM(ue.amount_owed), 0) AS saldo, COUNT(*) AS pendientes
        FROM unit_expenses ue JOIN expenses e ON ue.expense_id = e.id
-       WHERE ue.unit_number = $1 AND e.community_id = $2 AND ue.status IN ('pending', 'in_review')`,
-      [user.unit_number, user.community_id]
+       WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status IN ('pending', 'in_review')`,
+      [user.unit_id, user.community_id]
     );
 
     // Última expensa pagada
     const lastPaid = await pool.query(
       `SELECT e.description, ue.amount_owed, e.due_date
        FROM unit_expenses ue JOIN expenses e ON ue.expense_id = e.id
-       WHERE ue.unit_number = $1 AND e.community_id = $2 AND ue.status = 'paid'
+       WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status = 'paid'
        ORDER BY ue.confirmed_at DESC LIMIT 1`,
-      [user.unit_number, user.community_id]
+      [user.unit_id, user.community_id]
     );
 
     // Anuncios no leídos
@@ -42,9 +63,9 @@ const ChatContext = {
     const upcoming = await pool.query(
       `SELECT e.description, e.due_date, ue.amount_owed
        FROM unit_expenses ue JOIN expenses e ON ue.expense_id = e.id
-       WHERE ue.unit_number = $1 AND e.community_id = $2 AND ue.status = 'pending'
+       WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status = 'pending'
        ORDER BY e.due_date ASC LIMIT 3`,
-      [user.unit_number, user.community_id]
+      [user.unit_id, user.community_id]
     );
 
     const s = saldoQuery.rows[0];
@@ -56,9 +77,9 @@ const ChatContext = {
     if (parseFloat(s.saldo) > 0) {
       const pendingRows = await pool.query(
         `SELECT ue.id FROM unit_expenses ue JOIN expenses e ON ue.expense_id = e.id
-         WHERE ue.unit_number = $1 AND e.community_id = $2 AND ue.status = 'pending'
+         WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status = 'pending'
          ORDER BY e.due_date ASC`,
-        [user.unit_number, user.community_id]
+        [user.unit_id, user.community_id]
       );
       paymentUnitIds = pendingRows.rows.map(r => r.id);
     }

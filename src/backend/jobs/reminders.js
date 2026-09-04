@@ -1,7 +1,6 @@
 const cron = require('node-cron');
 const { Expense } = require('../models/Expense');
 const { Notification } = require('../models/Notification');
-const { pool } = require('../db');
 
 function startReminders() {
   // Todos los días a las 9:00 AM
@@ -12,10 +11,9 @@ function startReminders() {
       // Aviso: vence en 2 días
       const dueSoon = await Expense.findDueSoon(2);
       for (const item of dueSoon) {
-        const user = await pool.query('SELECT id FROM users WHERE email = $1 AND unit_number = $2', [item.user_email, item.unit_number]);
-        if (user.rows[0]) {
+        if (item.user_id) {
           await Notification.create({
-            user_id: user.rows[0].id,
+            user_id: item.user_id,
             type: 'reminder',
             title: 'Expensa próxima a vencer',
             message: `Tu expensa "${item.description}" vence en 2 días (${new Date(item.due_date).toLocaleDateString('es-AR')}). No olvides pagarla.`,
@@ -29,10 +27,9 @@ function startReminders() {
       const overdue = await Expense.findOverdue();
       for (const item of overdue) {
         const lateFee = parseFloat(item.amount_owed) * (parseFloat(item.late_fee_percent || 0) / 100);
-        const user = await pool.query('SELECT id FROM users WHERE email = $1 AND unit_number = $2', [item.user_email, item.unit_number]);
-        if (user.rows[0]) {
+        if (item.user_id) {
           await Notification.create({
-            user_id: user.rows[0].id,
+            user_id: item.user_id,
             type: 'reminder',
             title: 'Pago vencido',
             message: `Tu expensa "${item.description}" está vencida desde ayer. Se aplicará un recargo del ${item.late_fee_percent}% ($${lateFee.toFixed(2)}). Regularizá tu situación.`,
