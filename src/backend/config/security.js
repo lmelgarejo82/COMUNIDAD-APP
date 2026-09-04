@@ -15,6 +15,22 @@ function getJwtSecret(env = process.env) {
   return secret;
 }
 
+function getInvitationTokenSecret(env = process.env) {
+  const secret = typeof env.INVITATION_TOKEN_SECRET === 'string'
+    ? env.INVITATION_TOKEN_SECRET.trim()
+    : '';
+  if (!secret) throw configError('INVITATION_TOKEN_SECRET', 'debe configurarse explícitamente');
+  if (secret === LEGACY_JWT_SECRET) {
+    throw configError('INVITATION_TOKEN_SECRET', 'usa un valor conocido e inseguro');
+  }
+
+  const jwtSecret = getJwtSecret(env);
+  if (secret === jwtSecret) {
+    throw configError('INVITATION_TOKEN_SECRET', 'debe ser diferente de JWT_SECRET');
+  }
+  return secret;
+}
+
 function getPublicAppOrigin(env = process.env) {
   const configured = typeof env.PUBLIC_APP_URL === 'string' ? env.PUBLIC_APP_URL.trim() : '';
   if (!configured) throw configError('PUBLIC_APP_URL', 'debe configurarse explícitamente');
@@ -41,8 +57,14 @@ function getPublicAppOrigin(env = process.env) {
 function validateSecurityConfig(env = process.env) {
   return Object.freeze({
     jwtSecret: getJwtSecret(env),
+    invitationTokenSecret: getInvitationTokenSecret(env),
     publicAppOrigin: getPublicAppOrigin(env),
   });
 }
 
-module.exports = { getJwtSecret, getPublicAppOrigin, validateSecurityConfig };
+module.exports = {
+  getJwtSecret,
+  getInvitationTokenSecret,
+  getPublicAppOrigin,
+  validateSecurityConfig,
+};

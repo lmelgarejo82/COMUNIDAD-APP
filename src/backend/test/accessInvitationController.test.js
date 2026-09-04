@@ -50,7 +50,7 @@ function loadController(model = {}) {
   return require('../controllers/accessInvitationController');
 }
 
-test('admin generates invitation for own pending preauthorization', async () => {
+test('admin generates trusted-origin invitation for own pending preauthorization', async () => {
   let payload = null;
   const controller = loadController({
     async create(data) {
@@ -65,8 +65,9 @@ test('admin generates invitation for own pending preauthorization', async () => 
 
   await controller.create({
     params: { id: '44' },
-    protocol: 'https',
-    get() { return 'app.test'; },
+    protocol: 'http',
+    headers: { host: 'host-attacker.example', 'x-forwarded-host': 'forwarded-attacker.example' },
+    get() { return 'host-attacker.example'; },
     communityId: 7,
     user: { id: 10, role: 'admin' },
     body: {},
@@ -77,7 +78,8 @@ test('admin generates invitation for own pending preauthorization', async () => 
   assert.equal(payload.communityId, 7);
   assert.equal(payload.userId, 10);
   assert.equal(res.body.token, 'tok123456789');
-  assert.equal(res.body.invitation_url, 'https://app.test/invitacion/tok123456789');
+  assert.equal(res.body.invitation_url, 'http://localhost.test/invitacion/tok123456789');
+  assert.doesNotMatch(res.body.invitation_url, /host-attacker|forwarded-attacker/);
 });
 
 test('admin cannot generate invitation for preauthorization outside request community', async () => {

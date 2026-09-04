@@ -5,12 +5,14 @@ const path = require('node:path');
 
 const {
   getJwtSecret,
+  getInvitationTokenSecret,
   getPublicAppOrigin,
   validateSecurityConfig,
 } = require('../config/security');
 
 const backendDir = path.join(__dirname, '..');
 const validSecret = 'b35d-valid-configured-secret-with-enough-entropy';
+const validInvitationSecret = 'b35d1-valid-invitation-secret-with-enough-entropy';
 const legacySecret = 'cambiar-por-secreto-seguro-en-produccion';
 
 test('production rejects missing, empty and the known legacy JWT secret', () => {
@@ -33,6 +35,26 @@ test('test mode does not permit the known legacy JWT secret', () => {
   assert.throws(
     () => getJwtSecret({ NODE_ENV: 'test', JWT_SECRET: legacySecret }),
     { code: 'SECURITY_CONFIG_INVALID' }
+  );
+});
+
+test('invitation token secret is required, rejects known values and stays separate from JWT', () => {
+  for (const invitationSecret of [undefined, '', '   ', legacySecret, validSecret]) {
+    assert.throws(
+      () => getInvitationTokenSecret({
+        JWT_SECRET: validSecret,
+        INVITATION_TOKEN_SECRET: invitationSecret,
+      }),
+      { code: 'SECURITY_CONFIG_INVALID' }
+    );
+  }
+
+  assert.equal(
+    getInvitationTokenSecret({
+      JWT_SECRET: validSecret,
+      INVITATION_TOKEN_SECRET: validInvitationSecret,
+    }),
+    validInvitationSecret
   );
 });
 
@@ -62,6 +84,7 @@ test('server fails before listening when production JWT configuration is unsafe'
         ...process.env,
         NODE_ENV: 'production',
         JWT_SECRET: jwtSecret,
+        INVITATION_TOKEN_SECRET: validInvitationSecret,
         PUBLIC_APP_URL: 'https://app.example.test',
         QUEUE_ENABLED: 'false',
       },
@@ -76,13 +99,41 @@ test('server fails before listening when production JWT configuration is unsafe'
   }
 });
 
+test('server fails before listening when invitation token configuration is unsafe', () => {
+  for (const invitationSecret of ['', legacySecret, validSecret]) {
+    const result = spawnSync(process.execPath, ['server.js'], {
+      cwd: backendDir,
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        JWT_SECRET: validSecret,
+        INVITATION_TOKEN_SECRET: invitationSecret,
+        PUBLIC_APP_URL: 'https://app.example.test',
+        QUEUE_ENABLED: 'false',
+      },
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(result.stdout, /Backend corriendo/);
+    assert.match(result.stderr, /INVITATION_TOKEN_SECRET/);
+    assert.doesNotMatch(result.stderr, /cambiar-por-secreto/);
+  }
+});
+
 test('complete valid security configuration passes without exposing values', () => {
   assert.deepEqual(
     validateSecurityConfig({
       NODE_ENV: 'production',
       JWT_SECRET: validSecret,
+      INVITATION_TOKEN_SECRET: validInvitationSecret,
       PUBLIC_APP_URL: 'https://app.example.test/',
     }),
-    { jwtSecret: validSecret, publicAppOrigin: 'https://app.example.test' }
+    {
+      jwtSecret: validSecret,
+      invitationTokenSecret: validInvitationSecret,
+      publicAppOrigin: 'https://app.example.test',
+    }
   );
 });

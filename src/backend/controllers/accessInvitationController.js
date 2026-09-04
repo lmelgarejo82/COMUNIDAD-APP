@@ -1,4 +1,5 @@
 const { VisitorDigitalInvitation } = require('../models/VisitorDigitalInvitation');
+const { getPublicAppOrigin } = require('../config/security');
 
 function parsePositiveInt(value) {
   const parsed = parseInt(value, 10);
@@ -13,10 +14,11 @@ function requireCommunity(req, res) {
   return true;
 }
 
-function buildInvitationUrl(req, token) {
-  const configuredBase = process.env.PUBLIC_APP_URL || process.env.PUBLIC_INVITATION_BASE_URL;
-  const baseUrl = configuredBase || `${req.protocol}://${req.get('host')}`;
-  return `${baseUrl.replace(/\/$/, '')}/invitacion/${token}`;
+function buildInvitationUrl(token) {
+  return new URL(
+    `/invitacion/${encodeURIComponent(token)}`,
+    getPublicAppOrigin()
+  ).toString();
 }
 
 exports.list = async (req, res) => {
@@ -47,7 +49,7 @@ exports.create = async (req, res) => {
     });
     if (!result) return res.status(404).json({ error: 'Preautorización no encontrada' });
 
-    const invitationUrl = buildInvitationUrl(req, result.token);
+    const invitationUrl = buildInvitationUrl(result.token);
     res.status(201).json({
       message: 'Invitación digital generada correctamente.',
       invitation: result.invitation,

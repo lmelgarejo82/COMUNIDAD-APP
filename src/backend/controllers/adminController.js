@@ -2,6 +2,7 @@ const { Invite } = require('../models/Invite');
 const { AdminComplex } = require('../models/AdminComplex');
 const { pool } = require('../db');
 const nodemailer = require('nodemailer');
+const { getPublicAppOrigin } = require('../config/security');
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
@@ -48,7 +49,8 @@ exports.invite = async (req, res) => {
     });
     if (!invite) return res.status(404).json({ error: 'Unidad no encontrada' });
 
-    const inviteUrl = `${req.protocol}://${req.get('host')}/register?token=${invite.token}`;
+    const inviteUrl = new URL('/register', getPublicAppOrigin());
+    inviteUrl.searchParams.set('token', invite.token);
 
     let emailSent = false;
     let deliveryWarning = null;

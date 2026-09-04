@@ -299,14 +299,16 @@ function inviteRequest(unitId) {
     body: { email: 'invitee@example.test', unit_id: unitId, ownership_type: 'owner' },
     user: { id: 2 },
     communityId: 7,
-    protocol: 'http',
-    get: () => 'localhost:3000',
+    protocol: 'https',
+    headers: { host: 'host-attacker.example', 'x-forwarded-host': 'forwarded-attacker.example' },
+    get: () => 'host-attacker.example',
   };
 }
 
 test('admin invites a unit from req.communityId without a second mutation', async () => {
   const queries = [];
   let created = null;
+  let sentMail = null;
   const { invite } = loadAdminController({
     async onQuery(sql, params) {
       queries.push([sql, params]);
@@ -318,6 +320,7 @@ test('admin invites a unit from req.communityId without a second mutation', asyn
         return { id: 80, token: 'safe-token', unit_id: 11, ...payload };
       },
     },
+    sendMail: async (mail) => { sentMail = mail; return {}; },
   });
   const res = createResponse();
 
@@ -333,6 +336,8 @@ test('admin invites a unit from req.communityId without a second mutation', asyn
   assert.equal(res.body.message, 'Invitación enviada');
   assert.equal(res.body.email_sent, true);
   assert.equal(res.body.delivery_warning, null);
+  assert.match(sentMail.html, /http:\/\/localhost\.test\/register\?token=safe-token/);
+  assert.doesNotMatch(sentMail.html, /host-attacker|forwarded-attacker/);
 });
 
 test('SMTP failure after persistence returns success with a delivery warning and creates once', async () => {

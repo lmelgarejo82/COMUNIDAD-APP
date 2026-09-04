@@ -35,6 +35,7 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: postgresql://postgres:postgres@db:5432/comunidad
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET explicitly}
+      INVITATION_TOKEN_SECRET: ${INVITATION_TOKEN_SECRET:?Set INVITATION_TOKEN_SECRET explicitly}
       JWT_EXPIRES_IN: 7d
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL explicitly}
       EMAIL_HOST: smtp.ethereal.email
