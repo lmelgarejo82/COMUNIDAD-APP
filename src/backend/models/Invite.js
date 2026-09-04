@@ -1,12 +1,23 @@
 const { pool } = require('../db');
 const crypto = require('crypto');
 
+function normalizeToken(value) {
+  if (typeof value !== 'string') return null;
+  const token = value.trim();
+  return /^[0-9a-f]{64}$/.test(token) ? token : null;
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 const Invite = {
   async create({ email, community_id, unit_id, ownership_type, created_by }) {
     const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashToken(token);
     const expires = new Date(Date.now() + 7 * 24 * 3600000);
     const { rows } = await pool.query(
-      `INSERT INTO invites (email, community_id, unit_number, unit_id, ownership_type, token, created_by, expires_at)
+      `INSERT INTO invites (email, community_id, unit_number, unit_id, ownership_type, token_hash, created_by, expires_at)
        SELECT $1, $2, un.unit_code, un.id, $4, $5, $6, $7
        FROM units un
        JOIN floors f ON f.id = un.floor_id
@@ -19,21 +30,27 @@ const Invite = {
          AND f.deleted_at IS NULL
          AND b.deleted_at IS NULL
          AND cx.deleted_at IS NULL
-       RETURNING *`,
-      [email, community_id, unit_id, ownership_type, token, created_by, expires]
+       RETURNING id, email, community_id, unit_number, unit_id, ownership_type,
+                 created_by, used, expires_at, created_at`,
+      [email, community_id, unit_id, ownership_type, tokenHash, created_by, expires]
     );
-    return rows[0];
+    return rows[0] ? { ...rows[0], token } : undefined;
   },
 
-  async findForAcceptance(token, client) {
+  async findForAcceptance(tokenInput, client) {
+    const token = normalizeToken(tokenInput);
+    if (!token) return null;
+
     const { rows } = await client.query(
-      `SELECT i.*, un.unit_code AS resolved_unit_number
+      `SELECT i.id, i.email, i.community_id, i.unit_number, i.unit_id,
+              i.ownership_type, i.created_by, i.used, i.expires_at, i.created_at,
+              un.unit_code AS resolved_unit_number
        FROM invites i
        JOIN units un ON un.id = i.unit_id
        JOIN floors f ON f.id = un.floor_id
        JOIN buildings b ON b.id = f.building_id
        JOIN complexes cx ON cx.id = b.complex_id
-       WHERE i.token = $1
+       WHERE i.token_hash = $1
          AND i.used = FALSE
          AND i.expires_at > NOW()
          AND cx.community_id = i.community_id
@@ -43,7 +60,7 @@ const Invite = {
          AND b.deleted_at IS NULL
          AND cx.deleted_at IS NULL
        FOR UPDATE OF i, un`,
-      [token]
+      [hashToken(token)]
     );
     return rows[0] || null;
   },

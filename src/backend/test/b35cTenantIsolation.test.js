@@ -336,7 +336,10 @@ test('admin invites a unit from req.communityId without a second mutation', asyn
   assert.equal(res.body.message, 'Invitación enviada');
   assert.equal(res.body.email_sent, true);
   assert.equal(res.body.delivery_warning, null);
-  assert.match(sentMail.html, /http:\/\/localhost\.test\/register\?token=safe-token/);
+  assert.equal(Object.hasOwn(res.body, 'token'), false);
+  assert.equal(Object.hasOwn(res.body, 'token_hash'), false);
+  assert.match(sentMail.html, /http:\/\/localhost\.test\/register#token=safe-token/);
+  assert.doesNotMatch(sentMail.html, /register\?token=/);
   assert.doesNotMatch(sentMail.html, /host-attacker|forwarded-attacker/);
 });
 
@@ -369,7 +372,8 @@ test('SMTP failure after persistence returns success with a delivery warning and
   assert.equal(res.body.message, 'Invitación creada');
   assert.equal(res.body.email_sent, false);
   assert.match(res.body.delivery_warning, /creada.*no se pudo enviar/i);
-  assert.equal(res.body.token, 'persisted-token');
+  assert.equal(Object.hasOwn(res.body, 'token'), false);
+  assert.equal(Object.hasOwn(res.body, 'token_hash'), false);
 });
 
 test('invite persistence failure remains a real server failure and does not attempt email', async () => {

@@ -50,7 +50,7 @@ exports.invite = async (req, res) => {
     if (!invite) return res.status(404).json({ error: 'Unidad no encontrada' });
 
     const inviteUrl = new URL('/register', getPublicAppOrigin());
-    inviteUrl.searchParams.set('token', invite.token);
+    inviteUrl.hash = `token=${encodeURIComponent(invite.token)}`;
 
     let emailSent = false;
     let deliveryWarning = null;
@@ -77,7 +77,6 @@ exports.invite = async (req, res) => {
 
     res.status(201).json({
       message: emailSent ? 'Invitación enviada' : 'Invitación creada',
-      token: invite.token,
       unit_id: resolvedUnitId,
       unit_number: resolvedUnitNumber,
       ownership_type,

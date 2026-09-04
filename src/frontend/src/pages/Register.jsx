@@ -1,18 +1,26 @@
 import { useState, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { getErrorMessage } from '../services/errors';
 
 const PUBLIC_REGISTRATION_ENABLED = import.meta.env.VITE_PUBLIC_REGISTRATION_ENABLED === 'true';
 
 export default function Register() {
-  const [searchParams] = useSearchParams();
-  const inviteToken = searchParams.get('token');
+  const [inviteToken] = useState(() => {
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    return fragment.get('token');
+  });
   const [form, setForm] = useState({
     email: '', password: '', access_code: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (inviteToken && window.location.hash) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    }
+  }, [inviteToken]);
 
   function handleChange(e) {
     setForm({ ...form, [e.target.name]: e.target.value });

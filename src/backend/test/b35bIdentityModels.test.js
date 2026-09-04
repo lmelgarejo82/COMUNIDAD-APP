@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const dbPath = require.resolve('../db');
 const userPath = require.resolve('../models/User');
@@ -64,12 +65,18 @@ test('invite acceptance locks an unused invite and revalidates its active unit c
     },
   };
 
-  assert.equal(await Invite.findForAcceptance('token', client), null);
+  const presentedToken = 'a'.repeat(64);
+  const expectedHash = crypto.createHash('sha256').update(presentedToken).digest('hex');
+
+  assert.equal(await Invite.findForAcceptance(presentedToken, client), null);
+  assert.match(call.sql, /i\.token_hash = \$1/);
+  assert.doesNotMatch(call.sql, /i\.token\s*=/);
   assert.match(call.sql, /i\.used = FALSE/);
   assert.match(call.sql, /i\.expires_at > NOW\(\)/);
   assert.match(call.sql, /cx\.community_id = i\.community_id/);
   assert.match(call.sql, /FOR UPDATE OF i, un/);
-  assert.deepEqual(call.params, ['token']);
+  assert.equal(call.params.length, 1);
+  assert.equal(call.params[0] === expectedHash, true);
 });
 
 test('invite creation repeats unit tenant scope in the authoritative insert', async () => {
@@ -78,21 +85,33 @@ test('invite creation repeats unit tenant scope in the authoritative insert', as
   mockModule(dbPath, { pool: {
     async query(sql, params) {
       call = { sql: String(sql), params };
-      return { rows: [{ id: 20 }] };
+      const row = /token_hash/.test(String(sql))
+        ? { id: 20, token_hash: params[4] }
+        : { id: 20, token: params[4] };
+      return { rows: [row] };
     },
   } });
   const { Invite } = require(invitePath);
 
-  await Invite.create({
+  const created = await Invite.create({
     email: 'resident@example.test', community_id: 7, unit_id: 11,
     ownership_type: 'owner', created_by: 2,
   });
 
   assert.match(call.sql, /INSERT INTO invites[\s\S]*SELECT/);
+  assert.match(call.sql, /token_hash/);
+  assert.doesNotMatch(call.sql, /ownership_type,\s*token,/);
+  assert.doesNotMatch(call.sql, /RETURNING\s+\*/i);
   assert.match(call.sql, /un\.id = \$3/);
   assert.match(call.sql, /cx\.community_id = \$2/);
   assert.match(call.sql, /COALESCE\(un\.is_active, TRUE\) = TRUE/);
   assert.deepEqual(call.params.slice(0, 4), ['resident@example.test', 7, 11, 'owner']);
+  assert.equal(typeof created.token === 'string' && /^[0-9a-f]{64}$/.test(created.token), true);
+  assert.equal(call.params.includes(created.token), false);
+  assert.equal(
+    call.params[4] === crypto.createHash('sha256').update(created.token).digest('hex'),
+    true
+  );
 });
 
 test('payment authorization excludes future-dated ownerships', async () => {
@@ -132,4 +151,25 @@ test('migration 029 expires only ambiguous pending invites without rewriting use
   assert.match(sql, /created_at IS NULL OR created_at <= ownership_cutoff/i);
   assert.doesNotMatch(sql, /SET\s+used\s*=/i);
   assert.doesNotMatch(sql, /UPDATE\s+invites[\s\S]*ownership_type\s*=/i);
+});
+
+test('migration 031 removes plaintext invite credentials and invalidates only pending legacy rows', () => {
+  const migrationPath = path.join(
+    __dirname,
+    '..',
+    'migrations',
+    '031_hash_resident_invite_tokens.sql'
+  );
+  assert.equal(fs.existsSync(migrationPath), true);
+
+  const sql = fs.readFileSync(migrationPath, 'utf8');
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS token_hash VARCHAR\(64\)/i);
+  assert.match(sql, /SET expires_at = LEAST\(expires_at, NOW\(\)\)/i);
+  assert.match(sql, /used IS NOT TRUE/i);
+  assert.match(sql, /token_hash IS NULL/i);
+  assert.match(sql, /DROP COLUMN IF EXISTS token/i);
+  assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS idx_invites_token_hash/i);
+  assert.match(sql, /WHERE token_hash IS NOT NULL/i);
+  assert.doesNotMatch(sql, /SET\s+used\s*=/i);
+  assert.doesNotMatch(sql, /SET\s+token_hash\s*=/i);
 });
