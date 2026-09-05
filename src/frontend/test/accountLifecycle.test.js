@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createAccountRecoveryService } from '../src/services/accountRecovery.js';
 import {
   addResendingInvite,
   createInviteRequestTracker,
@@ -7,6 +8,31 @@ import {
   partitionInvites,
   removeResendingInvite,
 } from '../src/utils/invitePresentation.js';
+
+test('account recovery service sends only the email on forgot request', async () => {
+  const calls = [];
+  const service = createAccountRecoveryService({
+    post: async (...args) => { calls.push(args); return { data: { message: 'generic' } }; },
+  });
+
+  await service.request('resident@example.test');
+
+  assert.deepEqual(calls, [['/auth/forgot-password', { email: 'resident@example.test' }]]);
+});
+
+test('account recovery service sends the encoded token only in the reset path', async () => {
+  const calls = [];
+  const service = createAccountRecoveryService({
+    post: async (...args) => { calls.push(args); return { data: { message: 'updated' } }; },
+  });
+
+  await service.reset('token/with spaces', 'Secure123!');
+
+  assert.deepEqual(calls, [[
+    '/auth/reset-password/token%2Fwith%20spaces',
+    { password: 'Secure123!' },
+  ]]);
+});
 
 test('invite presentation separates pending from immutable history', () => {
   const rows = [

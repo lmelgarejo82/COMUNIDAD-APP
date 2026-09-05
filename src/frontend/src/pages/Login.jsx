@@ -38,6 +38,7 @@ export default function Login() {
         {PUBLIC_REGISTRATION_ENABLED
           ? <p style={styles.link}>¿No tenés cuenta? <Link to="/register">Registrate acá</Link></p>
           : <p style={styles.link}>¿No tenés cuenta? Pedí una invitación al administrador.</p>}
+        <p style={styles.link}><Link to="/forgot-password">¿Olvidaste tu contraseña?</Link></p>
       </form>
     </div>
   );
