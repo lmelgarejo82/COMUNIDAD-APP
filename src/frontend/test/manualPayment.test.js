@@ -586,6 +586,34 @@ test('admin detail completion after unmount cannot publish rows or loading state
   assert.equal(JSON.stringify(harness.stateSnapshot()), JSON.stringify(stateAfterUnmount));
 });
 
+test('admin blocks editing until the initial detail request settles', async () => {
+  const detail = deferred();
+  const expense = { id: 8, description: 'Original', fixed_amount: 100, extra_amount: 0, amount: 100, due_date: '2026-09-30' };
+  const harness = await renderExpensas({
+    user: { role: 'admin' },
+    adminExpenses: [expense],
+    serviceOverrides: { getUnitExpenses: () => detail.promise },
+  });
+  const expenseRow = allNodes(harness.tree(), node => node?.type === 'div' && node.props?.onClick && textContent(node).includes('Original'))[0];
+  const opening = expenseRow.props.onClick();
+  harness.render();
+
+  let editButton = nodeByText(harness.tree(), 'button', 'Editar expensa');
+  assert.equal(editButton.props.disabled, true, 'an edit cannot race the still-pending initial detail');
+  editButton.props.onClick();
+  harness.render();
+  assert.equal(allNodes(harness.tree(), node => node?.type === 'form' && node.props.id === 'edit-expense-form').length, 0, 'the handler must also reject a synthetic click while disabled');
+
+  detail.resolve({ data: { units: [] } });
+  await opening;
+  await settleComponent(harness);
+  editButton = nodeByText(harness.tree(), 'button', 'Editar expensa');
+  assert.equal(editButton.props.disabled, false);
+  editButton.props.onClick();
+  harness.render();
+  assert.equal(allNodes(harness.tree(), node => node?.type === 'form' && node.props.id === 'edit-expense-form').length, 1);
+});
+
 test('admin keeps two row mutations independently busy and ignores repeat attempts', async () => {
   const approve = deferred();
   const reject = deferred();
@@ -694,6 +722,61 @@ test('admin ignores an older row reconciliation after another row commits', asyn
   assert.equal(textContent(rowA).includes('Pagado'), true);
   assert.equal(textContent(rowB).includes('Rechazado'), true, 'older A readback must not restore B review state');
   assert.equal(textContent(rowB).includes('Rechazar'), false);
+});
+
+test('admin ignores an older review readback after a later metadata edit reconciles', async () => {
+  const oldReviewDetail = deferred();
+  const oldReviewList = deferred();
+  const original = { id: 8, description: 'Original', fixed_amount: 100, extra_amount: 0, amount: 100, due_date: '2026-09-30', period: '2026-09' };
+  const saved = { ...original, description: 'Saved description', fixed_amount: 125, amount: 125, period: '2026-10' };
+  const reviewUnit = { id: 41, unit_number: '1A', amount_owed: 100, status: 'in_review', payment_proof_url: '/uploads/a.pdf' };
+  const paidUnit = { ...reviewUnit, status: 'paid' };
+  const savedUnit = { ...paidUnit, amount_owed: 125 };
+  let detailCalls = 0;
+  let listCalls = 0;
+  const harness = await renderExpensas({
+    user: { role: 'admin' },
+    serviceOverrides: {
+      listAll: async () => {
+        listCalls += 1;
+        if (listCalls === 1) return { data: { data: [original], totalPages: 1 } };
+        if (listCalls === 2) return oldReviewList.promise;
+        return { data: { data: [saved], totalPages: 1 } };
+      },
+      getUnitExpenses: () => {
+        detailCalls += 1;
+        if (detailCalls === 1) return Promise.resolve({ data: { units: [reviewUnit] } });
+        if (detailCalls === 2) return oldReviewDetail.promise;
+        return Promise.resolve({ data: { units: [savedUnit] } });
+      },
+      confirmPayment: async () => ({ data: paidUnit }),
+      update: async () => ({ data: saved }),
+    },
+  });
+  const expenseRow = allNodes(harness.tree(), node => node?.type === 'div' && node.props?.onClick && textContent(node).includes('Original'))[0];
+  await expenseRow.props.onClick();
+  await settleComponent(harness);
+  const unitRow = allNodes(harness.tree(), node => node?.type === 'tr' && textContent(node).includes('1A'))[0];
+  const pendingReview = nodeByText(unitRow, 'button', 'Aprobar').props.onClick();
+  await Promise.resolve();
+  await Promise.resolve();
+  oldReviewList.resolve({ data: { data: [original], totalPages: 1 } });
+  await settleComponent(harness);
+  harness.render();
+
+  nodeByText(harness.tree(), 'button', 'Editar expensa').props.onClick();
+  harness.render();
+  const editForm = allNodes(harness.tree(), node => node?.type === 'form' && node.props.id === 'edit-expense-form')[0];
+  await editForm.props.onSubmit({ preventDefault() {} });
+  await settleComponent(harness);
+  assert.equal(textContent(allNodes(harness.tree(), node => node?.type === 'h3')[0]), 'Saved description');
+  assert.equal(textContent(harness.tree()).includes('$125'), true);
+
+  oldReviewDetail.resolve({ data: { units: [paidUnit] } });
+  await pendingReview;
+  await settleComponent(harness);
+  assert.equal(textContent(allNodes(harness.tree(), node => node?.type === 'h3')[0]), 'Saved description', 'older review header must not replace the later edit readback');
+  assert.equal(textContent(harness.tree()).includes('$125'), true, 'older review detail must not restore pre-edit unit amounts');
 });
 
 test('resident applies committed submission before failed refresh and offers reconciliation retry', async () => {
@@ -888,6 +971,53 @@ test('late review, edit and download completions cannot replace a reopened expen
   await settleComponent(harness);
   assert.equal(textContent(harness.tree()).includes('Expensa B'), true);
   assert.equal(textContent(harness.tree()).includes('Descarga A falló'), false);
+});
+
+test('admin retry refreshes a reopened expense header before unlocking edit', async () => {
+  const original = { id: 8, description: 'Original', fixed_amount: 100, extra_amount: 0, amount: 100, due_date: '2026-09-30', period: '2026-09' };
+  const saved = { ...original, description: 'Saved description', fixed_amount: 125, amount: 125, period: '2026-10' };
+  const update = deferred();
+  let mutationCommitted = false;
+  const harness = await renderExpensas({
+    user: { role: 'admin' },
+    serviceOverrides: {
+      listAll: async () => ({ data: { data: [mutationCommitted ? saved : original], totalPages: 1 } }),
+      getUnitExpenses: async () => ({ data: { units: [] } }),
+      update: () => update.promise,
+    },
+  });
+  let expenseRow = allNodes(harness.tree(), node => node?.type === 'div' && node.props?.onClick && textContent(node).includes('Original'))[0];
+  await expenseRow.props.onClick();
+  await settleComponent(harness);
+  nodeByText(harness.tree(), 'button', 'Editar expensa').props.onClick();
+  harness.render();
+  const editForm = allNodes(harness.tree(), node => node?.type === 'form' && node.props.id === 'edit-expense-form')[0];
+  const pendingEdit = editForm.props.onSubmit({ preventDefault() {} });
+  harness.render();
+  nodeByText(harness.tree(), 'button', 'Cerrar').props.onClick();
+  harness.render();
+
+  expenseRow = allNodes(harness.tree(), node => node?.type === 'div' && node.props?.onClick && textContent(node).includes('Original'))[0];
+  await expenseRow.props.onClick();
+  await settleComponent(harness);
+  mutationCommitted = true;
+  update.resolve({ data: saved });
+  await pendingEdit;
+  await settleComponent(harness);
+
+  assert.equal(textContent(allNodes(harness.tree(), node => node?.type === 'h3')[0]), 'Original', 'the obsolete completion itself must remain lifecycle-suppressed');
+  const retry = nodeByText(harness.tree(), 'button', 'Reintentar actualización');
+  assert.ok(retry);
+  await retry.props.onClick();
+  await settleComponent(harness);
+
+  assert.equal(textContent(allNodes(harness.tree(), node => node?.type === 'h3')[0]), 'Saved description');
+  const editButton = nodeByText(harness.tree(), 'button', 'Editar expensa');
+  assert.equal(editButton.props.disabled, false);
+  editButton.props.onClick();
+  harness.render();
+  const description = allNodes(harness.tree(), node => node?.type === 'input' && node.props.name === 'description')[0];
+  assert.equal(description.props.value, 'Saved description');
 });
 
 test('committed edit stays successful when list and detail reconciliation fail', async () => {

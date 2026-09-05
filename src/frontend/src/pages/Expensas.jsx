@@ -262,6 +262,7 @@ function AdminView() {
   const unreconciledExpensesRef = useRef({});
   const rowCommitVersionsRef = useRef({});
   const committedRowsRef = useRef({});
+  const reconciliationGenerationRef = useRef(0);
   const operationSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -277,6 +278,7 @@ function AdminView() {
       unreconciledExpensesRef.current = {};
       rowCommitVersionsRef.current = {};
       committedRowsRef.current = {};
+      reconciliationGenerationRef.current += 1;
     };
   }, []);
 
@@ -307,10 +309,11 @@ function AdminView() {
     try {
       const { data } = await expenseService.listAll(page);
       if (!mountedRef.current || generation !== listGenerationRef.current) return false;
-      setExpenses(data.data || []);
+      const nextExpenses = data.data || [];
+      setExpenses(nextExpenses);
       setTotalPages(data.totalPages || 1);
       setListError('');
-      return true;
+      return nextExpenses;
     } catch (err) {
       if (!mountedRef.current || generation !== listGenerationRef.current) return false;
       if (publishError) setListError(getErrorMessage(err, 'Error al cargar expensas'));
@@ -389,34 +392,41 @@ function AdminView() {
   }
 
   async function reconcileCurrent(expense, generation, blockedUnitId = null, blockedVersion = null) {
+    const reconciliationGeneration = ++reconciliationGenerationRef.current;
     const rowVersionsAtRequest = { ...rowCommitVersionsRef.current };
     const [detailResult, listResult] = await Promise.allSettled([
       expenseService.getUnitExpenses(expense.id),
       loadExpenses(false, false),
     ]);
-    if (!isCurrentDetail(expense.id, generation)) return false;
+    if (!isCurrentDetail(expense.id, generation)
+      || reconciliationGeneration !== reconciliationGenerationRef.current) return false;
 
     const detailSucceeded = detailResult.status === 'fulfilled';
-    const listSucceeded = listResult.status === 'fulfilled' && listResult.value;
+    const refreshedExpense = listResult.status === 'fulfilled' && Array.isArray(listResult.value)
+      ? listResult.value.find((item) => item.id === expense.id)
+      : null;
+    const listSucceeded = Boolean(refreshedExpense);
     if (detailSucceeded) {
       const nextUnits = detailResult.value.data.units || [];
       publishDetailRows(nextUnits, rowVersionsAtRequest);
       setDetailError('');
       updateUnreconciledRows((current) => {
         const next = { ...current };
-        if (blockedUnitId) {
-          if (rowCommitVersionsRef.current[blockedUnitId] === blockedVersion) {
-            delete next[blockedUnitId];
+        for (const unit of nextUnits) {
+          if (rowCommitVersionsRef.current[unit.id] === rowVersionsAtRequest[unit.id]) {
+            delete next[unit.id];
           }
-        } else {
-          for (const unit of nextUnits) {
-            if (rowCommitVersionsRef.current[unit.id] === rowVersionsAtRequest[unit.id]) {
-              delete next[unit.id];
-            }
-          }
+        }
+        if (blockedUnitId && rowCommitVersionsRef.current[blockedUnitId] === blockedVersion) {
+          delete next[blockedUnitId];
         }
         return next;
       });
+    }
+    if (refreshedExpense) {
+      setSelectedExpense((current) => (
+        current?.id === expense.id ? { ...current, ...refreshedExpense } : current
+      ));
     }
     if (detailSucceeded && listSucceeded) {
       setDetailWarning('');
@@ -441,7 +451,7 @@ function AdminView() {
   }
 
   function startEditing() {
-    if (busyEditsRef.current[selectedExpense.id] || unreconciledExpensesRef.current[selectedExpense.id]) return;
+    if (unitsLoading || busyEditsRef.current[selectedExpense.id] || unreconciledExpensesRef.current[selectedExpense.id]) return;
     setEditForm({
       description: selectedExpense.description || '',
       fixedAmount: String(selectedExpense.fixed_amount ?? ''),
@@ -633,9 +643,9 @@ function AdminView() {
             {!editing && (
               <button
                 type="button"
-                disabled={Boolean(busyEdits[selectedExpense.id] || unreconciledExpenses[selectedExpense.id])}
+                disabled={Boolean(unitsLoading || busyEdits[selectedExpense.id] || unreconciledExpenses[selectedExpense.id])}
                 onClick={startEditing}
-                style={{ ...s.editBtn, opacity: busyEdits[selectedExpense.id] || unreconciledExpenses[selectedExpense.id] ? 0.7 : 1 }}
+                style={{ ...s.editBtn, opacity: unitsLoading || busyEdits[selectedExpense.id] || unreconciledExpenses[selectedExpense.id] ? 0.7 : 1 }}
               >
                 {busyEdits[selectedExpense.id] ? 'Guardando...' : 'Editar expensa'}
               </button>
