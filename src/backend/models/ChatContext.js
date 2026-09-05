@@ -33,7 +33,7 @@ const ChatContext = {
     const saldoQuery = await pool.query(
       `SELECT COALESCE(SUM(ue.amount_owed), 0) AS saldo, COUNT(*) AS pendientes
        FROM unit_expenses ue JOIN expenses e ON ue.expense_id = e.id
-       WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status IN ('pending', 'in_review')`,
+       WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status IN ('pending', 'in_review', 'rejected')`,
       [user.unit_id, user.community_id]
     );
 
@@ -63,7 +63,7 @@ const ChatContext = {
     const upcoming = await pool.query(
       `SELECT e.description, e.due_date, ue.amount_owed
        FROM unit_expenses ue JOIN expenses e ON ue.expense_id = e.id
-       WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status = 'pending'
+       WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status IN ('pending', 'rejected')
        ORDER BY e.due_date ASC LIMIT 3`,
       [user.unit_id, user.community_id]
     );
@@ -77,7 +77,7 @@ const ChatContext = {
     if (parseFloat(s.saldo) > 0) {
       const pendingRows = await pool.query(
         `SELECT ue.id FROM unit_expenses ue JOIN expenses e ON ue.expense_id = e.id
-         WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status = 'pending'
+         WHERE ue.unit_id = $1 AND e.community_id = $2 AND ue.status IN ('pending', 'rejected')
          ORDER BY e.due_date ASC`,
         [user.unit_id, user.community_id]
       );

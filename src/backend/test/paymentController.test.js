@@ -361,16 +361,19 @@ test('MercadoPago webhook without a valid internal reference does not confirm an
   assert.equal(confirmations, 0);
 });
 
-test('admin cannot confirm a unit expense from another request community', async () => {
+test('admin receives safe 404 when confirming a unit expense from another request community', async () => {
   clearControllers();
   let confirmed = false;
+  const client = {
+    async query() { return { rows: [] }; },
+    release() {},
+  };
 
   mockModule(expensePath, {
     Expense: {
-      async findUnitExpenseWithCommunity() {
-        return { id: 50, status: 'in_review', expense_community_id: 2 };
-      },
-      async confirmUnitExpense() {
+      async lockExpenseForUnitExpense() { return null; },
+      async findReviewableUnitExpense() { throw new Error('foreign row must remain hidden'); },
+      async transitionManualReview() {
         confirmed = true;
       },
     },
@@ -380,6 +383,7 @@ test('admin cannot confirm a unit expense from another request community', async
   mockModule(whatsappPath, { sendPaymentConfirmation: async () => {} });
   mockModule(dbPath, {
     pool: {
+      async connect() { return client; },
       async query() {
         return { rows: [] };
       },
@@ -387,25 +391,30 @@ test('admin cannot confirm a unit expense from another request community', async
   });
 
   const { confirmPayment } = require('../controllers/expenseController');
-  const req = { params: { unitExpenseId: '50' }, communityId: 1 };
+  const req = { params: { unitExpenseId: '50' }, communityId: 1, user: { id: 7, role: 'admin' } };
   const res = createResponse();
 
   await confirmPayment(req, res);
 
-  assert.equal(res.statusCode, 403);
+  assert.equal(res.statusCode, 404);
   assert.equal(confirmed, false);
 });
 
 test('manual confirmation of an already paid expense does not reconfirm', async () => {
   clearControllers();
   let confirmed = false;
+  const client = {
+    async query() { return { rows: [] }; },
+    release() {},
+  };
 
   mockModule(expensePath, {
     Expense: {
-      async findUnitExpenseWithCommunity() {
+      async lockExpenseForUnitExpense() { return { id: 10, community_id: 1 }; },
+      async findReviewableUnitExpense() {
         return { id: 50, status: 'paid', expense_community_id: 1 };
       },
-      async confirmUnitExpense() {
+      async transitionManualReview() {
         confirmed = true;
       },
     },
@@ -415,6 +424,7 @@ test('manual confirmation of an already paid expense does not reconfirm', async 
   mockModule(whatsappPath, { sendPaymentConfirmation: async () => {} });
   mockModule(dbPath, {
     pool: {
+      async connect() { return client; },
       async query() {
         return { rows: [] };
       },
@@ -422,11 +432,11 @@ test('manual confirmation of an already paid expense does not reconfirm', async 
   });
 
   const { confirmPayment } = require('../controllers/expenseController');
-  const req = { params: { unitExpenseId: '50' }, communityId: 1 };
+  const req = { params: { unitExpenseId: '50' }, communityId: 1, user: { id: 7, role: 'admin' } };
   const res = createResponse();
 
   await confirmPayment(req, res);
 
-  assert.equal(res.statusCode, 400);
+  assert.equal(res.statusCode, 409);
   assert.equal(confirmed, false);
 });

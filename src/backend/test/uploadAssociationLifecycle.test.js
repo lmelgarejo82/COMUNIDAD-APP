@@ -167,13 +167,16 @@ test('every multer upload route tracks uncommitted files before its controller',
     [require('../routes/tickets'), '/', 'post'],
     [require('../routes/tickets'), '/:id/reply', 'post'],
     [require('../routes/expenses'), '/:id/upload-file', 'post'],
+    [require('../routes/expenses'), '/unit/:unitExpenseId/pay', 'put'],
   ];
 
   for (const [router, routePath, method] of cases) {
     const handlers = routeHandlers(router, routePath, method);
     const trackerIndex = handlers.indexOf('trackUploadedFile');
+    const errorHandlerIndex = handlers.indexOf('handleUploadError');
     assert.ok(trackerIndex >= 0, `${method.toUpperCase()} ${routePath} missing upload lifecycle`);
-    assert.equal(trackerIndex, handlers.length - 2);
+    assert.equal(errorHandlerIndex, handlers.length - 1);
+    assert.equal(trackerIndex, errorHandlerIndex - 2);
   }
 });
 

@@ -7,6 +7,7 @@ const { authenticate } = require('../middleware/auth');
 const { authorize } = require('../middleware/authorize');
 const { setCommunity } = require('../middleware/setCommunity');
 const { trackUploadedFile } = require('../middleware/uploadLifecycle');
+const { handleUploadError } = require('../middleware/uploadErrors');
 const { UPLOAD_DIRECTORY } = require('../services/uploadFiles');
 
 const storage = multer.diskStorage({
@@ -25,7 +26,7 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-router.post('/', authenticate, authorize('admin'), setCommunity, upload.single('file'), trackUploadedFile, documentsController.upload);
+router.post('/', authenticate, authorize('admin'), setCommunity, upload.single('file'), trackUploadedFile, documentsController.upload, handleUploadError);
 router.get('/', authenticate, authorize('admin', 'residente'), setCommunity, documentsController.list);
 
 module.exports = router;

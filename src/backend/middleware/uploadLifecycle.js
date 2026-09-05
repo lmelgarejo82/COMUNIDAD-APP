@@ -5,22 +5,26 @@ function trackUploadedFile(req, res, next) {
 
   let retained = false;
   let settled = false;
+  let cleanupPromise = null;
   req.retainUploadedFile = () => {
     retained = true;
   };
 
   const settle = () => {
-    if (settled) return;
+    if (settled) return cleanupPromise;
     settled = true;
     if (!retained) {
-      removeUploadedFile(req.file).catch(error => {
+      cleanupPromise = removeUploadedFile(req.file).catch(error => {
         console.error('Error limpiando archivo no asociado:', {
           filename: req.file.filename,
           error: error.message,
         });
       });
     }
+    return cleanupPromise;
   };
+
+  req.cleanupUploadedFile = settle;
 
   res.once('finish', settle);
   res.once('close', () => {

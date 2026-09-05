@@ -20,8 +20,8 @@ const Expense = {
     return rows[0];
   },
 
-  async findById(id) {
-    const { rows } = await pool.query(
+  async findById(id, client = null) {
+    const { rows } = await getQuery(client).query(
       'SELECT * FROM expenses WHERE id = $1 AND deleted_at IS NULL', [id]
     );
     return rows[0] || null;
@@ -56,9 +56,9 @@ const Expense = {
     return { data: rows, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) || 1 };
   },
 
-  async update(id, { description, fixed_amount, extra_amount, due_date, period }) {
+  async update(id, { description, fixed_amount, extra_amount, due_date, period }, client = null) {
     const total = parseFloat(fixed_amount || 0) + parseFloat(extra_amount || 0);
-    const { rows } = await pool.query(
+    const { rows } = await getQuery(client).query(
       `UPDATE expenses SET description = $2, amount = $3, fixed_amount = $4, extra_amount = $5,
        due_date = $6, period = $7 WHERE id = $1 AND deleted_at IS NULL RETURNING *`,
       [id, description, total, fixed_amount || 0, extra_amount || 0, due_date, period || null]
@@ -173,27 +173,122 @@ const Expense = {
     return rows[0] || null;
   },
 
-  async findPayableUnitExpenseForUser(id, userId, communityId) {
-    const { rows } = await pool.query(
+  async findPayableUnitExpenseForUser(id, userId, communityId, client = null) {
+    const { rows } = await getQuery(client).query(
       `SELECT ue.*, e.description, e.due_date, e.community_id
-       FROM unit_expenses ue
-       JOIN expenses e ON ue.expense_id = e.id
-       JOIN users u ON u.id = $2
-       WHERE ue.id = $1
-         AND e.community_id = $3
-         AND u.community_id = e.community_id
-         AND e.deleted_at IS NULL
-         AND EXISTS (
-           SELECT 1
-           FROM unit_ownerships uo
-           WHERE uo.unit_id = ue.unit_id
-             AND uo.user_id = u.id
-             AND (uo.start_date IS NULL OR uo.start_date <= NOW())
-             AND (uo.end_date IS NULL OR uo.end_date > NOW())
-         )`,
+        FROM unit_expenses ue
+        JOIN expenses e ON ue.expense_id = e.id
+        JOIN users usr ON usr.id = $2 AND usr.community_id = e.community_id
+        JOIN units un ON un.id = ue.unit_id
+        JOIN floors f ON f.id = un.floor_id
+        JOIN buildings b ON b.id = f.building_id
+        JOIN complexes cx ON cx.id = b.complex_id
+        JOIN unit_ownerships uo ON uo.unit_id = un.id AND uo.user_id = usr.id
+        WHERE ue.id = $1
+          AND e.community_id = $3
+          AND cx.community_id = e.community_id
+          AND e.deleted_at IS NULL
+          AND (uo.start_date IS NULL OR uo.start_date <= NOW())
+          AND (uo.end_date IS NULL OR uo.end_date > NOW())
+          AND COALESCE(un.is_active, TRUE) = TRUE
+          AND un.deleted_at IS NULL
+          AND f.deleted_at IS NULL
+          AND b.deleted_at IS NULL
+          AND cx.deleted_at IS NULL
+        FOR UPDATE OF ue`,
       [id, userId, communityId]
     );
     return rows[0] || null;
+  },
+
+  async lockExpenseForUnitExpense(id, communityId, client) {
+    const { rows } = await client.query(
+      `SELECT e.*
+       FROM expenses e
+       JOIN unit_expenses ue ON ue.expense_id = e.id
+       WHERE ue.id = $1
+         AND e.community_id = $2
+         AND e.deleted_at IS NULL
+       FOR UPDATE OF e`,
+      [id, communityId]
+    );
+    return rows[0] || null;
+  },
+
+  async findReviewableUnitExpense(id, communityId, client) {
+    const { rows } = await client.query(
+      `SELECT ue.*, e.community_id AS expense_community_id
+       FROM unit_expenses ue
+       JOIN expenses e ON e.id = ue.expense_id
+       WHERE ue.id = $1
+         AND e.community_id = $2
+         AND e.deleted_at IS NULL
+       FOR UPDATE OF ue`,
+      [id, communityId]
+    );
+    return rows[0] || null;
+  },
+
+  async transitionUnitExpenseToReview(id, paymentProofUrl, client) {
+    const { rows } = await client.query(
+      `UPDATE unit_expenses
+       SET status = 'in_review',
+           payment_proof_url = $2,
+           paid_at = NULL,
+           confirmed_at = NULL
+       WHERE id = $1
+         AND status IN ('pending', 'rejected')
+       RETURNING *`,
+      [id, paymentProofUrl]
+    );
+    return rows[0] || null;
+  },
+
+  async transitionManualReview(id, action, client) {
+    const approving = action === 'approve';
+    const { rows } = await client.query(
+      approving
+        ? `UPDATE unit_expenses
+           SET status = 'paid', paid_at = NOW(), confirmed_at = NOW()
+           WHERE id = $1
+             AND status = 'in_review'
+             AND payment_proof_url IS NOT NULL
+           RETURNING *`
+        : `UPDATE unit_expenses
+           SET status = 'rejected', paid_at = NULL, confirmed_at = NULL
+           WHERE id = $1
+             AND status = 'in_review'
+           RETURNING *`,
+      [id]
+    );
+    return rows[0] || null;
+  },
+
+  async findByIdForUpdate(id, communityId, client) {
+    const { rows } = await client.query(
+      `SELECT * FROM expenses
+       WHERE id = $1 AND community_id = $2 AND deleted_at IS NULL
+       FOR UPDATE`,
+      [id, communityId]
+    );
+    return rows[0] || null;
+  },
+
+  async hasUnitExpenseActivity(expenseId, client) {
+    const { rows } = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM unit_expenses
+         WHERE expense_id = $1
+           AND (
+             status <> 'pending'
+             OR payment_proof_url IS NOT NULL
+             OR paid_at IS NOT NULL
+             OR confirmed_at IS NOT NULL
+           )
+       ) AS has_activity`,
+      [expenseId]
+    );
+    return Boolean(rows[0]?.has_activity);
   },
 
   async updateUnitStatus(id, status, payment_proof_url = null) {
@@ -260,7 +355,7 @@ const Expense = {
        JOIN users usr ON usr.id = uo.user_id AND usr.community_id = e.community_id
        JOIN units un ON un.id = uo.unit_id
        WHERE e.due_date::date = $1::date
-         AND ue.status IN ('pending', 'in_review')
+         AND ue.status IN ('pending', 'in_review', 'rejected')
          AND e.deleted_at IS NULL`,
       [targetDate.toISOString().split('T')[0]]
     );
@@ -282,7 +377,7 @@ const Expense = {
        JOIN users usr ON usr.id = uo.user_id AND usr.community_id = e.community_id
        JOIN units un ON un.id = uo.unit_id
        WHERE e.due_date::date = $1::date
-         AND ue.status IN ('pending', 'in_review')
+         AND ue.status IN ('pending', 'in_review', 'rejected')
          AND e.deleted_at IS NULL`,
       [yesterday.toISOString().split('T')[0]]
     );

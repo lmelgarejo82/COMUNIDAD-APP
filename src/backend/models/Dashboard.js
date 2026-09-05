@@ -28,7 +28,7 @@ delinquent AS (
              SELECT 1 FROM unit_expenses ue2
              JOIN expenses e2 ON ue2.expense_id = e2.id
              WHERE ue2.unit_id = bu.unit_id
-               AND ue2.status IN ('pending', 'in_review')
+               AND ue2.status IN ('pending', 'in_review', 'rejected')
                AND e2.deleted_at IS NULL
            )
          ) AS delinquent_units
@@ -58,7 +58,7 @@ SELECT uo.ownership_type,
            SELECT 1 FROM unit_expenses ue2
            JOIN expenses e2 ON ue2.expense_id = e2.id
            WHERE ue2.unit_id = uo.unit_id
-             AND ue2.status IN ('pending', 'in_review')
+             AND ue2.status IN ('pending', 'in_review', 'rejected')
              AND e2.deleted_at IS NULL
          )
        ) AS delinquent_units,
@@ -69,7 +69,7 @@ SELECT uo.ownership_type,
                SELECT 1 FROM unit_expenses ue2
                JOIN expenses e2 ON ue2.expense_id = e2.id
                WHERE ue2.unit_id = uo.unit_id
-                 AND ue2.status IN ('pending', 'in_review')
+                 AND ue2.status IN ('pending', 'in_review', 'rejected')
                  AND e2.deleted_at IS NULL
              )
            )::decimal / COUNT(DISTINCT uo.unit_id) * 100, 1
@@ -138,7 +138,7 @@ const Dashboard = {
        JOIN expenses e ON ue.expense_id = e.id
        WHERE ue.unit_id = $1
          AND e.community_id = $2
-         AND ue.status IN ('pending', 'in_review')`,
+         AND ue.status IN ('pending', 'in_review', 'rejected')`,
       [user.unit_id, communityId]
     );
 
@@ -148,7 +148,7 @@ const Dashboard = {
        JOIN expenses e ON ue.expense_id = e.id
        WHERE ue.unit_id = $1
          AND e.community_id = $2
-         AND ue.status IN ('pending', 'in_review')
+         AND ue.status IN ('pending', 'in_review', 'rejected')
        ORDER BY e.due_date ASC
        LIMIT 1`,
       [user.unit_id, communityId]
@@ -210,7 +210,7 @@ async function computeAdmin(communityId) {
        FROM unit_expenses ue
        JOIN expenses e ON ue.expense_id = e.id
        WHERE e.community_id = $1
-         AND ue.status IN ('pending', 'in_review')`,
+         AND ue.status IN ('pending', 'in_review', 'rejected')`,
       [communityId]
     ),
     pool.query(
