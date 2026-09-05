@@ -262,7 +262,7 @@ function AdminView() {
   const unreconciledExpensesRef = useRef({});
   const rowCommitVersionsRef = useRef({});
   const committedRowsRef = useRef({});
-  const reconciliationGenerationRef = useRef(0);
+  const detailReadGenerationRef = useRef(0);
   const operationSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -278,7 +278,7 @@ function AdminView() {
       unreconciledExpensesRef.current = {};
       rowCommitVersionsRef.current = {};
       committedRowsRef.current = {};
-      reconciliationGenerationRef.current += 1;
+      detailReadGenerationRef.current += 1;
     };
   }, []);
 
@@ -288,6 +288,15 @@ function AdminView() {
     return mountedRef.current
       && selectedExpenseIdRef.current === expenseId
       && modalGenerationRef.current === generation;
+  }
+
+  function beginDetailRead() {
+    return ++detailReadGenerationRef.current;
+  }
+
+  function isCurrentDetailRead(expenseId, modalGeneration, readGeneration) {
+    return isCurrentDetail(expenseId, modalGeneration)
+      && detailReadGenerationRef.current === readGeneration;
   }
 
   function updateUnreconciledRows(updater) {
@@ -327,6 +336,7 @@ function AdminView() {
 
   async function openDetail(expense) {
     const generation = ++modalGenerationRef.current;
+    const readGeneration = beginDetailRead();
     const rowVersionsAtRequest = { ...rowCommitVersionsRef.current };
     selectedExpenseIdRef.current = expense.id;
     setSelectedExpense(expense);
@@ -341,15 +351,15 @@ function AdminView() {
     setEditFeedback(null);
     try {
       const { data: raw } = await expenseService.getUnitExpenses(expense.id);
-      if (!isCurrentDetail(expense.id, generation)) return;
+      if (!isCurrentDetailRead(expense.id, generation, readGeneration)) return;
       const nextUnits = raw.units || [];
       publishDetailRows(nextUnits, rowVersionsAtRequest);
     } catch (err) {
-      if (!isCurrentDetail(expense.id, generation)) return;
+      if (!isCurrentDetailRead(expense.id, generation, readGeneration)) return;
       setUnits([]);
       setDetailError(getErrorMessage(err, 'Error al cargar detalle'));
     } finally {
-      if (isCurrentDetail(expense.id, generation)) setUnitsLoading(false);
+      if (isCurrentDetailRead(expense.id, generation, readGeneration)) setUnitsLoading(false);
     }
   }
 
@@ -391,15 +401,14 @@ function AdminView() {
     }));
   }
 
-  async function reconcileCurrent(expense, generation, blockedUnitId = null, blockedVersion = null) {
-    const reconciliationGeneration = ++reconciliationGenerationRef.current;
+  async function reconcileCurrent(expense, generation, blockedUnitId = null, blockedVersion = null, requestedReadGeneration = null) {
+    const readGeneration = requestedReadGeneration ?? beginDetailRead();
     const rowVersionsAtRequest = { ...rowCommitVersionsRef.current };
     const [detailResult, listResult] = await Promise.allSettled([
       expenseService.getUnitExpenses(expense.id),
       loadExpenses(false, false),
     ]);
-    if (!isCurrentDetail(expense.id, generation)
-      || reconciliationGeneration !== reconciliationGenerationRef.current) return false;
+    if (!isCurrentDetailRead(expense.id, generation, readGeneration)) return false;
 
     const detailSucceeded = detailResult.status === 'fulfilled';
     const refreshedExpense = listResult.status === 'fulfilled' && Array.isArray(listResult.value)
@@ -445,9 +454,10 @@ function AdminView() {
     if (!selectedExpense) return;
     const expense = selectedExpense;
     const generation = modalGenerationRef.current;
+    const readGeneration = beginDetailRead();
     setUnitsLoading(true);
-    await reconcileCurrent(expense, generation);
-    if (isCurrentDetail(expense.id, generation)) setUnitsLoading(false);
+    await reconcileCurrent(expense, generation, null, null, readGeneration);
+    if (isCurrentDetailRead(expense.id, generation, readGeneration)) setUnitsLoading(false);
   }
 
   function startEditing() {

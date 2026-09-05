@@ -1020,6 +1020,72 @@ test('admin retry refreshes a reopened expense header before unlocking edit', as
   assert.equal(description.props.value, 'Saved description');
 });
 
+test('admin retry supersedes the reopened initial detail read', async () => {
+  const original = { id: 8, description: 'Original', fixed_amount: 100, extra_amount: 0, amount: 100, due_date: '2026-09-30', period: '2026-09' };
+  const saved = { ...original, description: 'Saved description', fixed_amount: 125, amount: 125, period: '2026-10' };
+  const originalUnit = { id: 41, unit_number: '1A', amount_owed: 100, status: 'pending', payment_proof_url: null };
+  const savedUnit = { ...originalUnit, amount_owed: 125 };
+  const update = deferred();
+  const lateInitialDetail = deferred();
+  let mutationCommitted = false;
+  let detailCalls = 0;
+  const harness = await renderExpensas({
+    user: { role: 'admin' },
+    serviceOverrides: {
+      listAll: async () => ({ data: { data: [mutationCommitted ? saved : original], totalPages: 1 } }),
+      getUnitExpenses: () => {
+        detailCalls += 1;
+        if (detailCalls === 1) return Promise.resolve({ data: { units: [originalUnit] } });
+        if (detailCalls === 2) return lateInitialDetail.promise;
+        return Promise.resolve({ data: { units: [savedUnit] } });
+      },
+      update: () => update.promise,
+    },
+  });
+  let expenseRow = allNodes(harness.tree(), node => node?.type === 'div' && node.props?.onClick && textContent(node).includes('Original'))[0];
+  await expenseRow.props.onClick();
+  await settleComponent(harness);
+  nodeByText(harness.tree(), 'button', 'Editar expensa').props.onClick();
+  harness.render();
+  let editForm = allNodes(harness.tree(), node => node?.type === 'form' && node.props.id === 'edit-expense-form')[0];
+  allNodes(editForm, node => node?.type === 'input' && node.props.name === 'description')[0]
+    .props.onChange({ target: { name: 'description', value: 'Saved description' } });
+  allNodes(editForm, node => node?.type === 'input' && node.props.name === 'fixedAmount')[0]
+    .props.onChange({ target: { name: 'fixedAmount', value: '125' } });
+  harness.render();
+  editForm = allNodes(harness.tree(), node => node?.type === 'form' && node.props.id === 'edit-expense-form')[0];
+  const pendingEdit = editForm.props.onSubmit({ preventDefault() {} });
+  harness.render();
+  nodeByText(harness.tree(), 'button', 'Cerrar').props.onClick();
+  harness.render();
+
+  expenseRow = allNodes(harness.tree(), node => node?.type === 'div' && node.props?.onClick && textContent(node).includes('Original'))[0];
+  const reopening = expenseRow.props.onClick();
+  harness.render();
+  mutationCommitted = true;
+  update.resolve({ data: saved });
+  await pendingEdit;
+  await settleComponent(harness);
+
+  let retry = nodeByText(harness.tree(), 'button', 'Reintentar actualización');
+  assert.ok(retry, 'the obsolete committed edit must expose reconciliation retry');
+  assert.equal(Boolean(retry.props.disabled), false, 'the rendered retry is enabled while the reopened initial detail is pending');
+  await retry.props.onClick();
+  await settleComponent(harness);
+  let unitRow = allNodes(harness.tree(), node => node?.type === 'tr' && textContent(node).includes('1A'))[0];
+  assert.equal(textContent(unitRow).includes('$125'), true);
+  assert.equal(textContent(allNodes(harness.tree(), node => node?.type === 'h3')[0]), 'Saved description');
+  assert.equal(nodeByText(harness.tree(), 'button', 'Editar expensa').props.disabled, false);
+
+  lateInitialDetail.resolve({ data: { units: [originalUnit] } });
+  await reopening;
+  await settleComponent(harness);
+  unitRow = allNodes(harness.tree(), node => node?.type === 'tr' && textContent(node).includes('1A'))[0];
+  assert.equal(textContent(unitRow).includes('$125'), true, 'the obsolete initial read must not restore the pre-edit amount');
+  assert.equal(textContent(allNodes(harness.tree(), node => node?.type === 'h3')[0]), 'Saved description');
+  assert.equal(nodeByText(harness.tree(), 'button', 'Editar expensa').props.disabled, false);
+});
+
 test('committed edit stays successful when list and detail reconciliation fail', async () => {
   const expense = { id: 8, description: 'Agosto', fixed_amount: 100, extra_amount: 0, amount: 100, due_date: '2026-09-30', period: '2026-09' };
   let detailCalls = 0;
