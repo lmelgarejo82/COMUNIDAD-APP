@@ -4,6 +4,14 @@ const { Expense } = require('../models/Expense');
 const { PaymentTransaction } = require('../models/PaymentTransaction');
 const { Notification } = require('../models/Notification');
 const { invalidatePattern } = require('../cache');
+const { getCapabilities } = require('../config/capabilities');
+
+function unavailable(res) {
+  return res.status(503).json({
+    code: 'CAPABILITY_UNAVAILABLE',
+    message: 'Mercado Pago no está disponible.',
+  });
+}
 
 function getClient() {
   const accessToken = process.env.MP_ACCESS_TOKEN;
@@ -18,6 +26,8 @@ function createExternalReference() {
 }
 
 exports.createPreference = async (req, res) => {
+  if (!getCapabilities().mercadoPago) return unavailable(res);
+
   try {
     const { unitExpenseId } = req.body;
     if (!unitExpenseId) {
@@ -116,6 +126,8 @@ async function confirmApprovedTransaction(tx, paymentId, payment) {
 }
 
 exports.webhook = async (req, res) => {
+  if (!getCapabilities().mercadoPago) return unavailable(res);
+
   try {
     const { type, data, action } = req.body;
 

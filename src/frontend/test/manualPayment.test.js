@@ -293,6 +293,7 @@ async function expensasComponentCode() {
             [/^react\/jsx-runtime$/, 'jsx-runtime'],
             [/services\/expensas(?:\.js)?$/, 'expensas'],
             [/services\/payments(?:\.js)?$/, 'payments'],
+            [/services\/capabilities(?:\.js)?$/, 'capabilities'],
             [/services\/protectedUploads(?:\.js)?$/, 'protected-uploads'],
             [/context\/AuthContext(?:\.jsx)?$/, 'auth'],
             [/CreateExpensa(?:\.jsx)?$/, 'create-expense'],
@@ -346,6 +347,13 @@ async function renderExpensas({
     'jsx-runtime': { Fragment: Symbol('Fragment'), jsx, jsxs: jsx },
     expensas: { expenseService },
     payments: { paymentService: { createPreference: () => assert.fail('MP must not be the pilot action') } },
+    capabilities: {
+      capabilityService: {
+        async get() {
+          return { aiAssistant: false, mercadoPago: false, automaticWhatsApp: false };
+        },
+      },
+    },
     'protected-uploads': {
       downloadProtectedUpload: downloadOverride
         || (async (...args) => calls.push(['download', ...args])),

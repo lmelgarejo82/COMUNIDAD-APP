@@ -51,6 +51,7 @@ async function removeReplacedProof(fileUrl) {
 }
 
 async function notifyPaymentApproval(unit, communityId) {
+  if (!whatsapp.isConfigured()) return;
   try {
     const admins = await pool.query(
       "SELECT phone FROM users WHERE community_id = $1 AND role = 'admin'",
@@ -69,6 +70,7 @@ async function notifyPaymentApproval(unit, communityId) {
 }
 
 async function notifyExpenseCreated(unitExpenseEntries, { communityId, description, dueDate }) {
+  if (!whatsapp.isConfigured()) return;
   try {
     const unitUsers = await pool.query(
       `SELECT phone, unit_number FROM users

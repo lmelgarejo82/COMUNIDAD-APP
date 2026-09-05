@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { validateSecurityConfig } = require('./config/security');
+const { getCapabilities } = require('./config/capabilities');
 const securityConfig = validateSecurityConfig();
 
 const express = require('express');
@@ -46,7 +47,7 @@ async function startServer() {
 
   app.use('/uploads', uploadsRoutes);
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', capabilities: getCapabilities() });
   });
   app.use('/api', limiters.globalLimiter);
 

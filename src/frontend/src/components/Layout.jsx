@@ -3,6 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCommunity } from '../context/CommunityContext';
 import { notificationService } from '../services/comunicacion';
+import { capabilityService } from '../services/capabilities';
 import WhatsAppButton from './WhatsAppButton';
 import ScopeSelector from './ScopeSelector';
 
@@ -27,11 +28,25 @@ export default function Layout() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [capabilities, setCapabilities] = useState({
+    aiAssistant: false,
+    mercadoPago: false,
+    automaticWhatsApp: false,
+  });
 
   const isAdmin = user?.role === 'admin';
   const isAccessOperator = user?.role === 'access_operator';
   const isMobile = width < 640;
-  const showFloatingSupport = width >= 768 && !isAccessOperator && !menuOpen && !notifOpen;
+  const showManualSupport = !isAccessOperator && !menuOpen && !notifOpen;
+  const showAiSupport = width >= 768 && showManualSupport && capabilities.aiAssistant;
+
+  useEffect(() => {
+    let active = true;
+    capabilityService.get().then((value) => {
+      if (active) setCapabilities(value);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (isAccessOperator) {
@@ -200,14 +215,12 @@ export default function Layout() {
         <Outlet key={selectedId} />
       </main>
 
-      {showFloatingSupport && (
-        <>
-          <Suspense fallback={null}>
-            <ChatWidget />
-          </Suspense>
-          <WhatsAppButton />
-        </>
+      {showAiSupport && (
+        <Suspense fallback={null}>
+          <ChatWidget />
+        </Suspense>
       )}
+      {showManualSupport && <WhatsAppButton />}
     </div>
   );
 }

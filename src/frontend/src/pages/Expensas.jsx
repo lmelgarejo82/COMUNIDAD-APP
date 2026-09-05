@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { expenseService } from '../services/expensas';
+import { paymentService } from '../services/payments';
+import { capabilityService } from '../services/capabilities';
 import { downloadProtectedUpload } from '../services/protectedUploads';
 import { useAuth } from '../context/AuthContext';
 import CreateExpensa from './CreateExpensa';
@@ -19,6 +21,8 @@ function ResidentView() {
   const [submitting, setSubmitting] = useState({});
   const [feedback, setFeedback] = useState({});
   const [unreconciled, setUnreconciled] = useState({});
+  const [mercadoPagoAvailable, setMercadoPagoAvailable] = useState(false);
+  const [payingWithMp, setPayingWithMp] = useState({});
   const mountedRef = useRef(true);
   const loadGenerationRef = useRef(0);
   const submitOperationsRef = useRef({});
@@ -31,6 +35,14 @@ function ResidentView() {
       loadGenerationRef.current += 1;
       submitOperationsRef.current = {};
     };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    capabilityService.get().then((capabilities) => {
+      if (active) setMercadoPagoAvailable(capabilities.mercadoPago === true);
+    });
+    return () => { active = false; };
   }, []);
 
   async function load(showSpinner = true, publishError = true) {
@@ -139,6 +151,28 @@ function ResidentView() {
     }
   }
 
+  async function payWithMercadoPago(unitExpense) {
+    if (!mercadoPagoAvailable || payingWithMp[unitExpense.id]) return;
+    setPayingWithMp((current) => ({ ...current, [unitExpense.id]: true }));
+    setFeedback((current) => ({ ...current, [unitExpense.id]: null }));
+    try {
+      const { data } = await paymentService.createPreference(unitExpense.id);
+      const target = data?.sandbox_init_point || data?.init_point;
+      if (!target) throw new Error('Mercado Pago no devolvió un destino de pago');
+      window.open(target, '_blank');
+    } catch (error) {
+      setFeedback((current) => ({
+        ...current,
+        [unitExpense.id]: {
+          type: 'error',
+          text: getErrorMessage(error, 'No pudimos iniciar el pago con Mercado Pago.'),
+        },
+      }));
+    } finally {
+      setPayingWithMp((current) => ({ ...current, [unitExpense.id]: false }));
+    }
+  }
+
   if (loading) return <div style={s.container}><Spinner /></div>;
 
   return (
@@ -204,6 +238,16 @@ function ResidentView() {
                       {isSubmitting ? 'Enviando...' : 'Enviar comprobante'}
                     </button>
                   </form>
+                )}
+                {mercadoPagoAvailable && u.status === 'pending' && (
+                  <button
+                    type="button"
+                    disabled={Boolean(payingWithMp[u.id])}
+                    style={{ ...s.secondaryBtn, marginTop: '0.5rem' }}
+                    onClick={() => payWithMercadoPago(u)}
+                  >
+                    {payingWithMp[u.id] ? 'Abriendo Mercado Pago...' : 'Pagar con MP'}
+                  </button>
                 )}
                 {rowFeedback && (
                   <p role={rowFeedback.type === 'error' ? 'alert' : 'status'} style={rowFeedback.type === 'error' ? s.inlineError : rowFeedback.type === 'warning' ? s.inlineWarning : s.inlineSuccess}>

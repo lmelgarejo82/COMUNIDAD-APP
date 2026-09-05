@@ -1,13 +1,20 @@
 const twilio = require('twilio');
+const { getCapabilities } = require('../config/capabilities');
+
+function isConfigured(env = process.env) {
+  return getCapabilities(env).automaticWhatsApp;
+}
 
 function getClient() {
+  if (!isConfigured()) return null;
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
-  if (!sid || !token) return null;
   return twilio(sid, token);
 }
 
 const whatsapp = {
+  isConfigured,
+
   async sendExpenseNotification({ toPhone, unitNumber, description, amount, dueDate }) {
     const client = getClient();
     if (!client) return;
@@ -31,7 +38,7 @@ const whatsapp = {
       await client.messages.create({
         from: `whatsapp:${from}`,
         to: `whatsapp:${toPhone}`,
-        body: `Comunidad App — Pago confirmado\n\nUnidad ${unitNumber} pagó $${amount}.\nEl pago fue aprobado automáticamente.`,
+        body: `Comunidad App — Pago confirmado\n\nSe aprobó el comprobante de la unidad ${unitNumber} por $${amount}.`,
       });
     } catch (err) {
       console.error('[WhatsApp] Error al enviar confirmación:', err.message);

@@ -70,6 +70,7 @@ function loadController({ Expense, client, poolQuery, notification, whatsapp } =
   });
   mockModule(cachePath, { invalidatePattern: async () => {} });
   mockModule(whatsappPath, whatsapp || {
+    isConfigured() { return true; },
     async sendExpenseNotification() {},
     async sendPaymentConfirmation() {},
   });
@@ -418,6 +419,45 @@ test('committed review remains successful when optional delivery fails', async (
   assert.deepEqual(client.events, ['BEGIN', 'COMMIT']);
 });
 
+test('committed manual approval skips optional phone lookup when WhatsApp is unavailable', async () => {
+  const client = makeClient();
+  let optionalLookups = 0;
+  const controller = loadController({
+    client,
+    Expense: {
+      async lockExpenseForUnitExpense() { return { id: 9 }; },
+      async findReviewableUnitExpense() {
+        return {
+          id: 41,
+          status: 'in_review',
+          payment_proof_url: '/uploads/proof.pdf',
+          unit_number: 'A-1',
+          amount_owed: '1500.00',
+        };
+      },
+      async transitionManualReview() { return { id: 41, status: 'paid' }; },
+    },
+    poolQuery: async () => { optionalLookups += 1; return { rows: [] }; },
+    whatsapp: {
+      isConfigured() { return false; },
+      async sendPaymentConfirmation() { assert.fail('must not send'); },
+    },
+  });
+  const res = response();
+
+  await controller.confirmPayment({
+    params: { unitExpenseId: '41' },
+    user: { id: 2, role: 'admin' },
+    communityId: 7,
+  }, res);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'paid');
+  assert.equal(optionalLookups, 0);
+  assert.deepEqual(client.events, ['BEGIN', 'COMMIT']);
+});
+
 test('manual approval releases its transaction client before bounded lookup and does not await stalled delivery', async () => {
   const client = makeClient();
   const events = client.events;
@@ -448,6 +488,7 @@ test('manual approval releases its transaction client before bounded lookup and 
       return { rows: [{ phone: 'synthetic-phone' }] };
     },
     whatsapp: {
+      isConfigured() { return true; },
       async sendPaymentConfirmation() {
         events.push('STALLED_DELIVERY');
         return new Promise(() => {});
@@ -601,6 +642,42 @@ test('expense creation returns 201 after commit when optional delivery lookup fa
   assert.deepEqual(client.events, ['BEGIN', 'COMMIT']);
 });
 
+test('committed expense creation skips optional phone lookup when WhatsApp is unavailable', async () => {
+  const client = makeClient();
+  let optionalLookups = 0;
+  const Expense = {
+    async getDistinctUnits() { return ['A-1']; },
+    async create(payload) { return { id: 9, ...payload }; },
+    async createUnitExpenses(id, entries) { return entries.map((entry, index) => ({ id: index + 1, ...entry })); },
+  };
+  loadController({
+    client,
+    Expense,
+    poolQuery: async () => { optionalLookups += 1; return { rows: [] }; },
+    whatsapp: {
+      isConfigured() { return false; },
+      async sendExpenseNotification() { assert.fail('must not send'); },
+    },
+  });
+  mockModule(require.resolve('../models/User'), {
+    User: { async findById() { return { id: 2, community_id: 7 }; } },
+  });
+  delete require.cache[controllerPath];
+  const controller = require('../controllers/expenseController');
+  const res = response();
+
+  await controller.create({
+    body: { description: 'Septiembre', fixedAmount: 100, extraAmount: 0, due_date: '2026-09-10' },
+    user: { id: 2, role: 'admin' },
+    communityId: 7,
+  }, res);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(optionalLookups, 0);
+  assert.deepEqual(client.events, ['BEGIN', 'COMMIT']);
+});
+
 test('expense creation releases its transaction client before bounded lookup and does not await stalled delivery', async () => {
   const client = makeClient();
   const events = client.events;
@@ -626,6 +703,7 @@ test('expense creation releases its transaction client before bounded lookup and
       return { rows: [{ phone: 'synthetic-phone', unit_number: 'A-1' }] };
     },
     whatsapp: {
+      isConfigured() { return true; },
       async sendExpenseNotification() {
         events.push('STALLED_DELIVERY');
         return new Promise(() => {});

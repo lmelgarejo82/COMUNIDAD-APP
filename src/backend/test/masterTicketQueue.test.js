@@ -3,6 +3,13 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 
 const queuePath = require.resolve('../jobs/masterTicketQueue');
+const dbPath = require.resolve('../db');
+const notificationPath = require.resolve('../models/Notification');
+const whatsappPath = require.resolve('../services/whatsapp');
+
+function mockModule(path, exports) {
+  require.cache[path] = { id: path, filename: path, loaded: true, exports };
+}
 
 function loadQueueWithBullMock({ queueEnabled, redisUrl, bullFactory }) {
   const previousQueueEnabled = process.env.QUEUE_ENABLED;
@@ -113,5 +120,51 @@ test('QUEUE_ENABLED=true initializes Bull with configured REDIS_URL', () => {
     assert.equal(receivedUrl, 'redis://redis:6379');
   } finally {
     restore();
+  }
+});
+
+test('unavailable WhatsApp keeps in-app notifications but skips phone lookup and sending log', async () => {
+  let inAppLookups = 0;
+  let phoneLookups = 0;
+  let notifications = 0;
+  const logs = [];
+  const originalLog = console.log;
+
+  mockModule(dbPath, {
+    pool: {
+      async query(sql) {
+        if (sql.includes('SELECT phone')) {
+          phoneLookups += 1;
+          return { rows: [{ phone: '+15551111111' }] };
+        }
+        inAppLookups += 1;
+        return { rows: [{ id: 91 }] };
+      },
+    },
+  });
+  mockModule(notificationPath, {
+    Notification: { async create() { notifications += 1; } },
+  });
+  mockModule(whatsappPath, {
+    isConfigured() { return false; },
+    async sendExpenseNotification() { assert.fail('must not send'); },
+  });
+  delete require.cache[queuePath];
+  console.log = (...args) => logs.push(args.join(' '));
+
+  try {
+    const queueModule = require('../jobs/masterTicketQueue');
+    assert.equal(typeof queueModule._private.sendNotifications, 'function');
+    await queueModule._private.sendNotifications(
+      { title: 'Corte de agua', description: 'Mantenimiento' },
+      [{ ticketId: 7, unitCode: '1A', userEmail: 'resident@example.test' }]
+    );
+    assert.equal(inAppLookups, 1);
+    assert.equal(notifications, 1);
+    assert.equal(phoneLookups, 0);
+    assert.equal(logs.some((entry) => /Enviando.*WhatsApp/i.test(entry)), false);
+  } finally {
+    console.log = originalLog;
+    delete require.cache[queuePath];
   }
 });

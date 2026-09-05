@@ -91,6 +91,7 @@ async function processWithRateLimit(tasks, concurrency, delayMs) {
 async function sendNotifications(master, ticketsWithOwner) {
   const whatsappTasks = [];
   const inAppTasks = [];
+  const whatsappConfigured = whatsapp.isConfigured();
 
   for (const item of ticketsWithOwner) {
     if (!item.userEmail) continue;
@@ -112,25 +113,27 @@ async function sendNotifications(master, ticketsWithOwner) {
       }
     });
 
-    whatsappTasks.push(async () => {
-      try {
-        const { rows: u } = await pool.query(
-          'SELECT phone FROM users WHERE email = $1 AND phone IS NOT NULL LIMIT 1',
-          [item.userEmail]
-        );
-        if (u[0]?.phone) {
-          await whatsapp.sendExpenseNotification({
-            toPhone: u[0].phone,
-            unitNumber: item.unitCode,
-            description: master.title,
-            amount: '-',
-            dueDate: '-',
-          });
+    if (whatsappConfigured) {
+      whatsappTasks.push(async () => {
+        try {
+          const { rows: u } = await pool.query(
+            'SELECT phone FROM users WHERE email = $1 AND phone IS NOT NULL LIMIT 1',
+            [item.userEmail]
+          );
+          if (u[0]?.phone) {
+            await whatsapp.sendExpenseNotification({
+              toPhone: u[0].phone,
+              unitNumber: item.unitCode,
+              description: master.title,
+              amount: '-',
+              dueDate: '-',
+            });
+          }
+        } catch (err) {
+          console.error(`[master-ticket] Error WhatsApp para ${item.userEmail}:`, err.message);
         }
-      } catch (err) {
-        console.error(`[master-ticket] Error WhatsApp para ${item.userEmail}:`, err.message);
-      }
-    });
+      });
+    }
   }
 
   // In-app notifications: fast batch
@@ -138,8 +141,10 @@ async function sendNotifications(master, ticketsWithOwner) {
   await processWithRateLimit(inAppTasks, NOTIFY_CONCURRENCY, 0);
 
   // WhatsApp: rate-limited
-  console.log(`[master-ticket] Enviando ${whatsappTasks.length} notificaciones WhatsApp con rate limiting...`);
-  await processWithRateLimit(whatsappTasks, 1, WHATSAPP_RATE_MS);
+  if (whatsappConfigured) {
+    console.log(`[master-ticket] Enviando ${whatsappTasks.length} notificaciones WhatsApp con rate limiting...`);
+    await processWithRateLimit(whatsappTasks, 1, WHATSAPP_RATE_MS);
+  }
 
   console.log('[master-ticket] Notificaciones completadas.');
 }
@@ -298,4 +303,8 @@ function init() {
   return queue;
 }
 
-module.exports = { enqueueGeneration, init, _private: { isQueueEnabled, getRedisUrl, disabledResult } };
+module.exports = {
+  enqueueGeneration,
+  init,
+  _private: { isQueueEnabled, getRedisUrl, disabledResult, sendNotifications },
+};

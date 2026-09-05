@@ -1,11 +1,19 @@
 const { ChatContext } = require('../models/ChatContext');
-const { MercadoPagoConfig, Preference } = require('mercadopago');
+const { getCapabilities } = require('../config/capabilities');
 
 const DEEPSEEK_API = 'https://api.deepseek.com/v1/chat/completions';
 
 const conversationHistory = new Map();
 
 exports.query = async (req, res) => {
+  const capabilities = getCapabilities();
+  if (!capabilities.aiAssistant) {
+    return res.status(503).json({
+      code: 'CAPABILITY_UNAVAILABLE',
+      message: 'El asistente virtual no está disponible.',
+    });
+  }
+
   try {
     const { message } = req.body;
     if (!message || !message.trim()) {
@@ -19,6 +27,10 @@ exports.query = async (req, res) => {
     }
 
     const ctx = contextData.context;
+
+    const paymentGuidance = capabilities.mercadoPago
+      ? 'Indicá que puede enviar el comprobante para revisión administrativa y que, si lo prefiere, también puede usar el botón "Pagar con MP" disponible para expensas pendientes.'
+      : 'Indicá que puede pagar por los medios informados por la administración y enviar el comprobante desde la sección Expensas para su revisión administrativa.';
 
     const systemPrompt = `Eres un asistente virtual de "Comunidad App", una plataforma de gestión de comunidades residenciales. Hablás en español, sos amable y conciso.
 
@@ -34,7 +46,7 @@ DATOS DEL USUARIO:
 INSTRUCCIONES:
 1. Respondé preguntas sobre expensas, pagos, saldos, anuncios, amenities, reglamentos.
 2. Si el usuario pregunta por su saldo, respondé con el monto exacto y las fechas de vencimiento.
-3. Si el usuario quiere PAGAR una expensa y tiene saldo pendiente, decile: "Podés pagar tus expensas desde la sección Expensas de la app. Allí verás el botón 'Pagar con MP' para cada expensa pendiente."
+3. Si el usuario quiere PAGAR una expensa y tiene saldo pendiente: ${paymentGuidance}
 4. NO inventes números ni fechas. Usá solo los datos provistos.
 5. Si el usuario pregunta algo que no está en los datos (ej. "cuándo es la próxima reunión"), decile que consultes con la administración.
 6. Mantené respuestas breves (máximo 3-4 oraciones).`;
