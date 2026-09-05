@@ -50,6 +50,9 @@ services:
       AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-20}
       PUBLIC_REGISTRATION_ENABLED: ${PUBLIC_REGISTRATION_ENABLED:-false}
       TRUST_PROXY_IP: '172.30.0.2'
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - upload_data:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -78,6 +81,7 @@ services:
 
 volumes:
   pgdata:
+  upload_data:
 
 networks:
   proxy:

@@ -1,7 +1,25 @@
 const fs = require('fs');
 const path = require('path');
 
-const UPLOAD_DIRECTORY = path.resolve(__dirname, '..', 'uploads');
+const configured = process.env.UPLOAD_DIR;
+if (configured !== undefined && configured.trim() === '') {
+  throw new Error('UPLOAD_DIR debe indicar un directorio no vacío');
+}
+
+const UPLOAD_DIRECTORY = configured === undefined
+  ? path.resolve(__dirname, '..', 'uploads')
+  : path.resolve(configured.trim());
+
+try {
+  fs.mkdirSync(UPLOAD_DIRECTORY, { recursive: true });
+  if (!fs.statSync(UPLOAD_DIRECTORY).isDirectory()) {
+    throw new Error('La ruta configurada no es un directorio');
+  }
+} catch (error) {
+  throw new Error(`No se pudo preparar UPLOAD_DIR como directorio: ${UPLOAD_DIRECTORY}`, {
+    cause: error,
+  });
+}
 
 function decodeUploadPath(rawPath) {
   let decoded = rawPath;

@@ -9,9 +9,10 @@ const { sanitize } = require('../middleware/sanitize');
 const { setCommunity } = require('../middleware/setCommunity');
 const { logAudit } = require('../middleware/logAudit');
 const { trackUploadedFile } = require('../middleware/uploadLifecycle');
+const { UPLOAD_DIRECTORY } = require('../services/uploadFiles');
 
 const storage = multer.diskStorage({
-  destination: path.join(__dirname, '..', 'uploads'),
+  destination: UPLOAD_DIRECTORY,
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const ext = path.extname(file.originalname);
