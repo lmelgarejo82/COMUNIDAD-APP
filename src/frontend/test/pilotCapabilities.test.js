@@ -77,6 +77,16 @@ async function settle(render, flush) {
   render();
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
 test('capability service caches one request and projects only literal true fields', async () => {
   assert.equal(typeof capabilityModule.createCapabilityService, 'function');
   let calls = 0;
@@ -113,9 +123,18 @@ test('capability service fails closed for rejected and malformed health response
 
 const layoutPath = fileURLToPath(new URL('../src/components/Layout.jsx', import.meta.url));
 
-async function renderLayout({ width, capabilities, phone = '+5491112345678', role = 'residente' }) {
+async function renderLayout({
+  width,
+  capabilities,
+  phone = '+5491112345678',
+  role = 'residente',
+  capabilityServiceOverride = null,
+}) {
   const hooks = hooksHarness();
   let capabilityCalls = 0;
+  const selectedCapabilityService = capabilityServiceOverride || {
+    async get() { return capabilities; },
+  };
   const output = await build({
     entryPoints: [layoutPath], bundle: true, format: 'cjs', platform: 'node', jsx: 'automatic', write: false,
     plugins: [{
@@ -154,7 +173,7 @@ async function renderLayout({ width, capabilities, phone = '+5491112345678', rol
     communication: { notificationService: { count: async () => ({ data: { count: 0 } }) } },
     capabilities: {
       capabilityService: {
-        async get() { capabilityCalls += 1; return capabilities; },
+        get() { capabilityCalls += 1; return selectedCapabilityService.get(); },
       },
     },
     api: { get: async () => ({ data: { phone } }) },
@@ -173,7 +192,11 @@ async function renderLayout({ width, capabilities, phone = '+5491112345678', rol
   const render = () => { hooks.begin(); tree = Component({}); return tree; };
   render();
   await settle(render, () => hooks.flush());
-  return { tree, capabilityCalls };
+  return {
+    get tree() { return tree; },
+    get capabilityCalls() { return capabilityCalls; },
+    settle: () => settle(render, () => hooks.flush()),
+  };
 }
 
 test('Layout hides AI when unavailable while retaining explicit manual wa.me on desktop and mobile', async () => {
@@ -204,9 +227,31 @@ test('Layout renders AI only after a literal true capability and keeps guards ex
   assert.equal(nodes(guard.tree, (node) => node?.type === 'a' && node.props?.href?.startsWith('https://wa.me/')).length, 0);
 });
 
+test('Layout stays fail-closed while capability reads are pending and after malformed or rejected settlement', async () => {
+  for (const outcome of ['malformed', 'rejected']) {
+    const pending = deferred();
+    const service = capabilityModule.createCapabilityService({ get: () => pending.promise });
+    const rendered = await renderLayout({
+      width: 390,
+      capabilityServiceOverride: service,
+    });
+    assert.equal(nodes(rendered.tree, (node) => node?.props?.['data-capability'] === 'ai-chat').length, 0);
+    assert.equal(nodes(rendered.tree, (node) => node?.type === 'a' && node.props?.href?.startsWith('https://wa.me/')).length, 1);
+
+    if (outcome === 'malformed') {
+      pending.resolve({ data: { capabilities: { aiAssistant: 'true', mercadoPago: 1 } } });
+    } else {
+      pending.reject(new Error('synthetic health failure'));
+    }
+    await rendered.settle();
+    assert.equal(nodes(rendered.tree, (node) => node?.props?.['data-capability'] === 'ai-chat').length, 0);
+    assert.equal(nodes(rendered.tree, (node) => node?.type === 'a' && node.props?.href?.startsWith('https://wa.me/')).length, 1);
+  }
+});
+
 const expensasPath = fileURLToPath(new URL('../src/pages/Expensas.jsx', import.meta.url));
 
-async function renderResidentExpenses(mercadoPago) {
+async function renderResidentExpenses(mercadoPago, { capabilityServiceOverride = null } = {}) {
   const hooks = hooksHarness();
   const paymentCalls = [];
   const opened = [];
@@ -236,7 +281,11 @@ async function renderResidentExpenses(mercadoPago) {
     expenses: { expenseService: { listMy: async () => ({ data: [{ id: 4, description: 'Agosto', status: 'pending', amount_owed: 100 }] }) } },
     payments: { paymentService: { async createPreference(id) { paymentCalls.push(id); return { data: { init_point: 'https://pay.example.test/4' } }; } } },
     uploads: { downloadProtectedUpload: async () => {} },
-    capabilities: { capabilityService: { async get() { return { aiAssistant: false, mercadoPago, automaticWhatsApp: false }; } } },
+    capabilities: {
+      capabilityService: capabilityServiceOverride || {
+        async get() { return { aiAssistant: false, mercadoPago, automaticWhatsApp: false }; },
+      },
+    },
     auth: { useAuth: () => ({ user: { role: 'residente' } }) },
     create: { default: () => null }, spinner: { default: () => null },
     errors: { getErrorMessage: (_error, fallback) => fallback },
@@ -253,8 +302,34 @@ async function renderResidentExpenses(mercadoPago) {
   const render = () => { hooks.begin(); tree = Component({}); return tree; };
   render();
   await settle(render, () => hooks.flush());
-  return { tree, paymentCalls, opened, render };
+  return {
+    get tree() { return tree; },
+    paymentCalls,
+    opened,
+    render,
+    settle: () => settle(render, () => hooks.flush()),
+  };
 }
+
+test('Expensas stays fail-closed while capability reads are pending and after malformed or rejected settlement', async () => {
+  for (const outcome of ['malformed', 'rejected']) {
+    const pending = deferred();
+    const service = capabilityModule.createCapabilityService({ get: () => pending.promise });
+    const rendered = await renderResidentExpenses(false, { capabilityServiceOverride: service });
+    assert.match(textContent(rendered.tree), /Comprobante de pago/);
+    assert.doesNotMatch(textContent(rendered.tree), /Pagar con MP/);
+
+    if (outcome === 'malformed') {
+      pending.resolve({ data: { capabilities: { aiAssistant: false, mercadoPago: 'true' } } });
+    } else {
+      pending.reject(new Error('synthetic health failure'));
+    }
+    await rendered.settle();
+    assert.match(textContent(rendered.tree), /Comprobante de pago/);
+    assert.doesNotMatch(textContent(rendered.tree), /Pagar con MP/);
+    assert.deepEqual(rendered.paymentCalls, []);
+  }
+});
 
 test('Expensas keeps manual proof primary and renders a working MP action only when enabled', async () => {
   const disabled = await renderResidentExpenses(false);

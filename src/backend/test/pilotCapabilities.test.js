@@ -93,6 +93,104 @@ test('capabilities accept meaningful configured values including sandbox-prefixe
   });
 });
 
+test('GET /api/health exposes the real server capability projection and no sensitive fields', async () => {
+  await withEnv({
+    PORT: '0',
+    DEEPSEEK_API_KEY: undefined,
+    MP_ACCESS_TOKEN: undefined,
+    TWILIO_ACCOUNT_SID: undefined,
+    TWILIO_AUTH_TOKEN: undefined,
+    TWILIO_WHATSAPP_NUMBER: undefined,
+  }, async () => {
+    const serverPath = require.resolve('../server');
+    const expressPath = require.resolve('express');
+    const securityPath = require.resolve('../config/security');
+    const rateLimiterPath = require.resolve('../middleware/rateLimiter');
+    const reminderPath = require.resolve('../jobs/reminders');
+    const queuePath = require.resolve('../jobs/masterTicketQueue');
+    const routePaths = [
+      '../routes/uploads', '../routes/dashboard', '../routes/expenses', '../routes/hierarchy',
+      '../routes/masterTickets', '../routes/announcements', '../routes/tickets',
+      '../routes/notifications', '../routes/users', '../routes/admin', '../routes/reports',
+      '../routes/payments', '../routes/webhooks', '../routes/bookings', '../routes/chat',
+      '../routes/polls', '../routes/documents', '../routes/phone', '../routes/accessLogs',
+      '../routes/accessInvitations', '../routes/accessPreauthorizations',
+    ].map(path => require.resolve(path));
+    const authRoutePath = require.resolve('../routes/auth');
+    const mockedPaths = [
+      serverPath, expressPath, securityPath, rateLimiterPath, reminderPath, queuePath,
+      authRoutePath, ...routePaths,
+    ];
+    const priorCache = new Map(mockedPaths.map(path => [path, require.cache[path]]));
+    const realExpress = require('express');
+    const passthrough = (_req, _res, next) => next();
+    let listener;
+    let resolveStarted;
+    let rejectStarted;
+    const started = new Promise((resolve, reject) => {
+      resolveStarted = resolve;
+      rejectStarted = reject;
+    });
+    const isolatedExpress = (...args) => {
+      const app = realExpress(...args);
+      const realListen = app.listen.bind(app);
+      app.listen = (_configuredPort, onListening) => {
+        listener = realListen(0, '127.0.0.1', () => {
+          try {
+            onListening?.();
+            resolveStarted(listener);
+          } catch (error) {
+            rejectStarted(error);
+          }
+        });
+        listener.on('error', rejectStarted);
+        return listener;
+      };
+      return app;
+    };
+    Object.assign(isolatedExpress, realExpress);
+
+    mockModule(expressPath, isolatedExpress);
+    mockModule(securityPath, { validateSecurityConfig: () => ({ trustProxy: false }) });
+    mockModule(rateLimiterPath, {
+      initializeRateLimiters: async () => ({ globalLimiter: passthrough }),
+    });
+    mockModule(reminderPath, { startReminders() {} });
+    mockModule(queuePath, { init() {} });
+    mockModule(authRoutePath, () => passthrough);
+    for (const path of routePaths) mockModule(path, passthrough);
+    delete require.cache[serverPath];
+
+    try {
+      require('../server');
+      const runningServer = await started;
+      const address = runningServer.address();
+      const result = await fetch(`http://127.0.0.1:${address.port}/api/health`);
+      assert.equal(result.status, 200);
+      const body = await result.json();
+      assert.deepEqual(body, {
+        status: 'ok',
+        capabilities: {
+          aiAssistant: false,
+          mercadoPago: false,
+          automaticWhatsApp: false,
+        },
+      });
+      assert.deepEqual(Object.keys(body).sort(), ['capabilities', 'status']);
+      assert.deepEqual(Object.keys(body.capabilities).sort(), [
+        'aiAssistant', 'automaticWhatsApp', 'mercadoPago',
+      ]);
+      assert.equal(Object.values(body.capabilities).every(value => typeof value === 'boolean'), true);
+    } finally {
+      if (listener) await new Promise(resolve => listener.close(resolve));
+      for (const [path, cached] of priorCache) {
+        if (cached) require.cache[path] = cached;
+        else delete require.cache[path];
+      }
+    }
+  });
+});
+
 test('disabled chat returns a stable 503 before context lookup or outbound fetch', async () => {
   await withEnv({ DEEPSEEK_API_KEY: undefined }, async () => {
     let contextLookups = 0;

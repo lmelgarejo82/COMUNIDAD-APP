@@ -26,6 +26,7 @@ function ResidentView() {
   const mountedRef = useRef(true);
   const loadGenerationRef = useRef(0);
   const submitOperationsRef = useRef({});
+  const mpOperationsRef = useRef({});
 
   useEffect(() => {
     mountedRef.current = true;
@@ -34,6 +35,7 @@ function ResidentView() {
       mountedRef.current = false;
       loadGenerationRef.current += 1;
       submitOperationsRef.current = {};
+      mpOperationsRef.current = {};
     };
   }, []);
 
@@ -92,6 +94,7 @@ function ResidentView() {
 
   async function submitProof(event, unitExpense) {
     event.preventDefault();
+    if (mpOperationsRef.current[unitExpense.id]) return;
     const file = files[unitExpense.id];
     const validation = validatePaymentProof(file);
     if (validation) {
@@ -152,24 +155,34 @@ function ResidentView() {
   }
 
   async function payWithMercadoPago(unitExpense) {
-    if (!mercadoPagoAvailable || payingWithMp[unitExpense.id]) return;
+    if (!mercadoPagoAvailable
+      || submitOperationsRef.current[unitExpense.id]
+      || mpOperationsRef.current[unitExpense.id]) return;
+    const operation = Symbol(`mp:${unitExpense.id}`);
+    mpOperationsRef.current[unitExpense.id] = operation;
     setPayingWithMp((current) => ({ ...current, [unitExpense.id]: true }));
     setFeedback((current) => ({ ...current, [unitExpense.id]: null }));
     try {
       const { data } = await paymentService.createPreference(unitExpense.id);
+      if (!mountedRef.current || mpOperationsRef.current[unitExpense.id] !== operation) return;
       const target = data?.sandbox_init_point || data?.init_point;
       if (!target) throw new Error('Mercado Pago no devolvió un destino de pago');
       window.open(target, '_blank');
     } catch (error) {
-      setFeedback((current) => ({
-        ...current,
-        [unitExpense.id]: {
-          type: 'error',
-          text: getErrorMessage(error, 'No pudimos iniciar el pago con Mercado Pago.'),
-        },
-      }));
+      if (mountedRef.current && mpOperationsRef.current[unitExpense.id] === operation) {
+        setFeedback((current) => ({
+          ...current,
+          [unitExpense.id]: {
+            type: 'error',
+            text: getErrorMessage(error, 'No pudimos iniciar el pago con Mercado Pago.'),
+          },
+        }));
+      }
     } finally {
-      setPayingWithMp((current) => ({ ...current, [unitExpense.id]: false }));
+      if (mountedRef.current && mpOperationsRef.current[unitExpense.id] === operation) {
+        delete mpOperationsRef.current[unitExpense.id];
+        setPayingWithMp((current) => ({ ...current, [unitExpense.id]: false }));
+      }
     }
   }
 
@@ -193,6 +206,8 @@ function ResidentView() {
             ? []
             : manualPaymentActions(u.status, 'residente', Boolean(u.payment_proof_url));
           const isSubmitting = Boolean(submitting[u.id]);
+          const isPayingWithMp = Boolean(payingWithMp[u.id]);
+          const isPaymentBusy = isSubmitting || isPayingWithMp;
           const rowFeedback = feedback[u.id];
           return (
             <div key={u.id} style={s.row}>
@@ -225,15 +240,15 @@ function ResidentView() {
                       type="file"
                       accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
                       required
-                      disabled={isSubmitting}
+                      disabled={isPaymentBusy}
                       onChange={(event) => selectProof(u.id, event.target.files?.[0])}
                       style={s.fileInput}
                     />
                     <span style={s.fileHelp}>PDF, JPG, JPEG o PNG · máximo 5 MiB.</span>
                     <button
                       type="submit"
-                      disabled={isSubmitting}
-                      style={{ ...s.actionBtn, ...s.submitProofBtn, opacity: isSubmitting ? 0.7 : 1 }}
+                      disabled={isPaymentBusy}
+                      style={{ ...s.actionBtn, ...s.submitProofBtn, opacity: isPaymentBusy ? 0.7 : 1 }}
                     >
                       {isSubmitting ? 'Enviando...' : 'Enviar comprobante'}
                     </button>
@@ -242,11 +257,11 @@ function ResidentView() {
                 {mercadoPagoAvailable && u.status === 'pending' && (
                   <button
                     type="button"
-                    disabled={Boolean(payingWithMp[u.id])}
+                    disabled={isPaymentBusy}
                     style={{ ...s.secondaryBtn, marginTop: '0.5rem' }}
                     onClick={() => payWithMercadoPago(u)}
                   >
-                    {payingWithMp[u.id] ? 'Abriendo Mercado Pago...' : 'Pagar con MP'}
+                    {isPayingWithMp ? 'Abriendo Mercado Pago...' : 'Pagar con MP'}
                   </button>
                 )}
                 {rowFeedback && (

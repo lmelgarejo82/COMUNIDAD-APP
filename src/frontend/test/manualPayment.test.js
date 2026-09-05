@@ -322,6 +322,9 @@ async function renderExpensas({
   updateError = null,
   serviceOverrides = {},
   downloadOverride = null,
+  paymentOverride = null,
+  capabilityOverride = null,
+  windowOpenOverride = null,
 }) {
   const hooks = componentHooks();
   const calls = [];
@@ -346,9 +349,13 @@ async function renderExpensas({
     react: hooks.api,
     'jsx-runtime': { Fragment: Symbol('Fragment'), jsx, jsxs: jsx },
     expensas: { expenseService },
-    payments: { paymentService: { createPreference: () => assert.fail('MP must not be the pilot action') } },
+    payments: {
+      paymentService: {
+        createPreference: paymentOverride || (() => assert.fail('MP must not be the pilot action')),
+      },
+    },
     capabilities: {
-      capabilityService: {
+      capabilityService: capabilityOverride || {
         async get() {
           return { aiAssistant: false, mercadoPago: false, automaticWhatsApp: false };
         },
@@ -378,7 +385,7 @@ async function renderExpensas({
     module,
     exports: module.exports,
     setTimeout,
-    window: {},
+    window: { open: windowOpenOverride || (() => {}) },
   });
   context.globalThis = context;
   vm.runInContext(await expensasComponentCode(), context, { filename: 'Expensas.bundle.cjs' });
@@ -446,6 +453,173 @@ test('resident payment cards render manual proof upload and rejected retry witho
   assert.equal(fileInputs.length, 2);
   assert.equal(fileInputs.every(input => input.props.required === true), true);
   assert.deepEqual(buttons.filter(label => label === 'Enviar comprobante'), ['Enviar comprobante', 'Enviar comprobante']);
+});
+
+test('resident MP action ignores a same-render repeat before React publishes busy state', async () => {
+  const preference = deferred();
+  const opened = [];
+  let preferenceCalls = 0;
+  const harness = await renderExpensas({
+    user: { role: 'residente' },
+    residentRows: [{ id: 41, description: 'Agosto', status: 'pending', amount_owed: 100 }],
+    capabilityOverride: {
+      async get() { return { aiAssistant: false, mercadoPago: true, automaticWhatsApp: false }; },
+    },
+    paymentOverride: () => {
+      preferenceCalls += 1;
+      return preference.promise;
+    },
+    windowOpenOverride: (...args) => opened.push(args),
+  });
+  const pay = nodeByText(harness.tree(), 'button', 'Pagar con MP');
+  const first = pay.props.onClick();
+  const repeat = pay.props.onClick();
+
+  assert.equal(preferenceCalls, 1, 'one rendered handler must own at most one provider preference request');
+  preference.resolve({ data: { init_point: 'https://pay.example.test/41' } });
+  await Promise.all([first, repeat]);
+  assert.deepEqual(opened, [['https://pay.example.test/41', '_blank']]);
+});
+
+test('resident MP rows stay independently busy when the later row settles first', async () => {
+  const firstPreference = deferred();
+  const secondPreference = deferred();
+  const calls = [];
+  const opened = [];
+  const harness = await renderExpensas({
+    user: { role: 'residente' },
+    residentRows: [
+      { id: 41, description: 'Agosto', status: 'pending', amount_owed: 100 },
+      { id: 42, description: 'Septiembre', status: 'pending', amount_owed: 120 },
+    ],
+    capabilityOverride: {
+      async get() { return { aiAssistant: false, mercadoPago: true, automaticWhatsApp: false }; },
+    },
+    paymentOverride: (id) => {
+      calls.push(id);
+      return id === 41 ? firstPreference.promise : secondPreference.promise;
+    },
+    windowOpenOverride: (...args) => opened.push(args),
+  });
+  const payButtons = allNodes(harness.tree(), node => node?.type === 'button' && textContent(node) === 'Pagar con MP');
+  const first = payButtons[0].props.onClick();
+  const second = payButtons[1].props.onClick();
+  harness.render();
+
+  secondPreference.resolve({ data: { init_point: 'https://pay.example.test/42' } });
+  await second;
+  await settleComponent(harness);
+  const afterSecond = allNodes(
+    harness.tree(),
+    node => node?.type === 'button' && ['Pagar con MP', 'Abriendo Mercado Pago...'].includes(textContent(node))
+  );
+  assert.deepEqual(calls, [41, 42]);
+  assert.equal(textContent(afterSecond[0]), 'Abriendo Mercado Pago...');
+  assert.equal(afterSecond[0].props.disabled, true);
+  assert.equal(textContent(afterSecond[1]), 'Pagar con MP');
+  assert.equal(afterSecond[1].props.disabled, false, 'only the completing row owner is released');
+
+  firstPreference.resolve({ data: { init_point: 'https://pay.example.test/41' } });
+  await first;
+  assert.deepEqual(opened, [
+    ['https://pay.example.test/42', '_blank'],
+    ['https://pay.example.test/41', '_blank'],
+  ]);
+});
+
+test('resident MP completions after unmount cannot navigate or publish success and error state', async () => {
+  const success = deferred();
+  const failure = deferred();
+  const opened = [];
+  const harness = await renderExpensas({
+    user: { role: 'residente' },
+    residentRows: [
+      { id: 41, description: 'Agosto', status: 'pending', amount_owed: 100 },
+      { id: 42, description: 'Septiembre', status: 'pending', amount_owed: 120 },
+    ],
+    capabilityOverride: {
+      async get() { return { aiAssistant: false, mercadoPago: true, automaticWhatsApp: false }; },
+    },
+    paymentOverride: (id) => id === 41 ? success.promise : failure.promise,
+    windowOpenOverride: (...args) => opened.push(args),
+  });
+  const payButtons = allNodes(harness.tree(), node => node?.type === 'button' && textContent(node) === 'Pagar con MP');
+  const successPending = payButtons[0].props.onClick();
+  const failurePending = payButtons[1].props.onClick();
+  harness.render();
+  harness.unmount();
+  const stateAtUnmount = JSON.stringify(harness.stateSnapshot());
+
+  success.resolve({ data: { init_point: 'https://pay.example.test/41' } });
+  failure.reject(new Error('synthetic provider failure'));
+  await Promise.all([successPending, failurePending]);
+
+  assert.deepEqual(opened, [], 'an obsolete success cannot open an external destination');
+  assert.equal(JSON.stringify(harness.stateSnapshot()), stateAtUnmount, 'late completions cannot publish feedback or release state');
+});
+
+test('resident proof submission owns the row before an MP action can start', async () => {
+  const proof = deferred();
+  let preferenceCalls = 0;
+  const harness = await renderExpensas({
+    user: { role: 'residente' },
+    residentRows: [{ id: 41, description: 'Agosto', status: 'pending', amount_owed: 100 }],
+    capabilityOverride: {
+      async get() { return { aiAssistant: false, mercadoPago: true, automaticWhatsApp: false }; },
+    },
+    paymentOverride: async () => {
+      preferenceCalls += 1;
+      return { data: { init_point: 'https://pay.example.test/41' } };
+    },
+    serviceOverrides: { submitPayment: () => proof.promise },
+  });
+  const input = allNodes(harness.tree(), node => node?.type === 'input' && node.props.type === 'file')[0];
+  input.props.onChange({ target: { files: [new File(['proof'], 'proof.pdf', { type: 'application/pdf' })] } });
+  harness.render();
+  const form = allNodes(harness.tree(), node => node?.type === 'form')[0];
+  const pay = nodeByText(harness.tree(), 'button', 'Pagar con MP');
+  const proofPending = form.props.onSubmit({ preventDefault() {} });
+  const ignoredMp = pay.props.onClick();
+  harness.render();
+
+  assert.equal(preferenceCalls, 0, 'MP cannot bypass a proof submission that already owns the row');
+  assert.equal(nodeByText(harness.tree(), 'button', 'Pagar con MP').props.disabled, true);
+  proof.resolve({ data: { id: 41, status: 'in_review', payment_proof_url: '/uploads/proof.pdf' } });
+  await Promise.all([proofPending, ignoredMp]);
+});
+
+test('resident MP action owns the row before a proof submission can start', async () => {
+  const preference = deferred();
+  let submitCalls = 0;
+  const harness = await renderExpensas({
+    user: { role: 'residente' },
+    residentRows: [{ id: 41, description: 'Agosto', status: 'pending', amount_owed: 100 }],
+    capabilityOverride: {
+      async get() { return { aiAssistant: false, mercadoPago: true, automaticWhatsApp: false }; },
+    },
+    paymentOverride: () => preference.promise,
+    serviceOverrides: {
+      submitPayment: async () => {
+        submitCalls += 1;
+        return { data: { id: 41, status: 'in_review' } };
+      },
+    },
+  });
+  const input = allNodes(harness.tree(), node => node?.type === 'input' && node.props.type === 'file')[0];
+  input.props.onChange({ target: { files: [new File(['proof'], 'proof.pdf', { type: 'application/pdf' })] } });
+  harness.render();
+  const pay = nodeByText(harness.tree(), 'button', 'Pagar con MP');
+  const form = allNodes(harness.tree(), node => node?.type === 'form')[0];
+  const mpPending = pay.props.onClick();
+  const ignoredProof = form.props.onSubmit({ preventDefault() {} });
+  harness.render();
+
+  assert.equal(submitCalls, 0, 'proof submission cannot bypass an MP action that already owns the row');
+  const busyInput = allNodes(harness.tree(), node => node?.type === 'input' && node.props.type === 'file')[0];
+  assert.equal(busyInput.props.disabled, true);
+  assert.equal(nodeByText(harness.tree(), 'button', 'Enviar comprobante').props.disabled, true);
+  preference.resolve({ data: { init_point: 'https://pay.example.test/41' } });
+  await Promise.all([mpPending, ignoredProof]);
 });
 
 test('admin review renders authenticated download and proof-aware approve or recovery rejection', async () => {
