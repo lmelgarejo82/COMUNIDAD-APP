@@ -1,26 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { getErrorMessage } from '../services/errors';
+import { consumeFragmentToken, subscribeFragmentToken } from '../utils/fragmentToken';
 
 const PUBLIC_REGISTRATION_ENABLED = import.meta.env.VITE_PUBLIC_REGISTRATION_ENABLED === 'true';
 
 export default function Register() {
-  const [inviteToken] = useState(() => {
-    const fragment = new URLSearchParams(window.location.hash.slice(1));
-    return fragment.get('token');
-  });
+  const [inviteToken, setInviteToken] = useState(() => consumeFragmentToken(window));
   const [form, setForm] = useState({
     email: '', password: '', access_code: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (inviteToken && window.location.hash) {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
-    }
-  }, [inviteToken]);
+  useLayoutEffect(() => subscribeFragmentToken(window, (token) => {
+    setInviteToken(token);
+    setForm({ email: '', password: '', access_code: '' });
+    setError('');
+  }), []);
 
   function handleChange(e) {
     setForm({ ...form, [e.target.name]: e.target.value });
