@@ -235,4 +235,48 @@ test('shipped Nginx keeps reset credentials out of proxy and application logs', 
   assert.equal(queryStatus === 204, true, 'body reset with a query must still reach the backend safely');
   assert.equal(trailingStatus === 204, true, 'trailing-slash body reset must still reach the backend safely');
   assert.equal(failingBodyStatus === 502, true, 'body reset must exercise the protected upstream-error path');
+
+  await t.test('visitor links protect final SPA responses, errors and subsequent asset referrers', async () => {
+    const { randomBytes } = require('node:crypto');
+    const tokens = [];
+    const pages = [];
+    for (const prefix of ['/invitacion/', '/INVITACION/', '/InViTaCiOn/', '/%69nvitacion/', '/invitacion%2F']) {
+      const token = randomBytes(32).toString('base64url'); tokens.push(token);
+      const response = await fetch(`${origin}${prefix}${token}`);
+      const html = await response.text();
+      pages.push({ ok: response.status === 200 && html.includes('<div id="root">'), protected: response.headers.get('referrer-policy') === 'no-referrer' });
+      const asset = html.match(/src="(\/assets\/[^\"]+\.js)"/)[1];
+      // Follow the actual response policy, as a browser does for same-origin subresources.
+      const headers = response.headers.get('referrer-policy') === 'no-referrer' ? {} : { referer: `${origin}${prefix}${token}` };
+      const resource = await fetch(`${origin}${asset}`, { headers }); await resource.arrayBuffer();
+      assert.equal(resource.status, 200, 'sensitive navigation must preserve SPA assets');
+    }
+    assertDockerSucceeded(runDocker(['exec', frontend, 'chmod', '000', '/usr/share/nginx/html/index.html']), 'isolated index permission probe must apply');
+    const errorToken = randomBytes(32).toString('base64url'); tokens.push(errorToken);
+    let failed;
+    try {
+      failed = await fetch(`${origin}/%69nvitacion/${errorToken}`); await failed.arrayBuffer();
+    } finally {
+      assertDockerSucceeded(runDocker(['exec', frontend, 'chmod', '644', '/usr/share/nginx/html/index.html']), 'isolated index permission probe restored');
+    }
+    const logs = runDocker(['logs', frontend]); assertDockerSucceeded(logs, 'sensitive-link logs inspectable');
+    const combined = `${logs.stdout}${logs.stderr}`;
+    const lines = combined.split('\n');
+    const checks = {
+      spaServed: pages.every(page => page.ok),
+      responseNoReferrer: pages.every(page => page.protected),
+      accessTokenPresent: lines.some(line => line.includes('GET /') && tokens.some(token => line.includes(token))),
+      assetReferrerTokenPresent: lines.some(line => line.includes('GET /assets/') && tokens.some(token => line.includes(token))),
+      errorTokenPresent: combined.includes(errorToken),
+      errorExercised: failed.status === 403,
+      errorNoReferrer: failed.headers.get('referrer-policy') === 'no-referrer',
+    };
+    t.diagnostic(JSON.stringify(checks));
+    assert.equal(checks.spaServed, true);
+    assert.equal(checks.errorExercised, true);
+    assert.equal(checks.accessTokenPresent, false, 'visitor token must be absent after final SPA serving');
+    assert.equal(checks.assetReferrerTokenPresent, false, 'browser asset referrer must not echo visitor token');
+    assert.equal(checks.errorTokenPresent, false, 'visitor token must be absent from error/access logs on serving failure');
+    assert.equal(checks.responseNoReferrer && checks.errorNoReferrer, true);
+  });
 });
