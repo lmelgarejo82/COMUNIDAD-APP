@@ -7,7 +7,9 @@ const { getInvitationTokenSecret } = require('../config/security');
 const DEFAULT_TOKEN_TTL_HOURS = 24;
 
 const baseSelect = `
-  SELECT vdi.*,
+  SELECT vdi.id, vdi.community_id, vdi.preauthorization_id,
+         vdi.token_hint, vdi.expires_at, vdi.revoked_at, vdi.revoked_by,
+         vdi.created_by, vdi.created_at, vdi.updated_at,
          CASE
            WHEN vdi.revoked_at IS NOT NULL THEN 'revoked'
            WHEN vdi.expires_at < NOW() THEN 'expired'

@@ -158,6 +158,7 @@ const Dashboard = {
       `SELECT a.title, a.message AS content, a.created_at
        FROM announcements a
        WHERE a.community_id = $1
+         AND a.deleted_at IS NULL
        ORDER BY a.created_at DESC
        LIMIT 2`,
       [communityId]
