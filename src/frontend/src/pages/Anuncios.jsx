@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { announcementService } from '../services/comunicacion';
 import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/Spinner';
@@ -11,65 +11,121 @@ export default function Anuncios() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', message: '' });
   const [msg, setMsg] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [readbackError, setReadbackError] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [pendingRows, setPendingRows] = useState({});
+  const [rowErrors, setRowErrors] = useState({});
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const isAdmin = user?.role === 'admin';
+  const mounted = useRef(false);
+  const readVersion = useRef(0);
+  const operations = useRef(new Set());
+  const needsReadback = useRef(false);
+  const currentPage = useRef(page);
+  currentPage.current = page;
 
-  useEffect(() => { load(); }, [page, isAdmin]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; readVersion.current += 1; };
+  }, []);
+  useEffect(() => { load(page); }, [page, isAdmin]);
 
-  async function load() {
+  async function load(targetPage = currentPage.current) {
+    const version = ++readVersion.current;
     setLoading(true);
+    setLoadError('');
+    setReadbackError('');
     try {
-      const { data } = isAdmin ? await announcementService.listAll(page) : await announcementService.listResident(page);
+      const { data } = isAdmin ? await announcementService.listAll(targetPage) : await announcementService.listResident(targetPage);
+      if (!mounted.current || version !== readVersion.current) return;
+      const lastPage = data.totalPages || 1;
+      if (targetPage > lastPage) {
+        setPage(lastPage);
+        return;
+      }
       setAnnouncements(data.data || []);
-      setTotalPages(data.totalPages || 1);
+      setTotalPages(lastPage);
+      setLoaded(true);
+      needsReadback.current = false;
     } catch (err) {
-      setMsg(getErrorMessage(err, 'Error al cargar anuncios'));
+      if (!mounted.current || version !== readVersion.current) return;
+      if (needsReadback.current) setReadbackError('Los cambios están guardados. No se pudo actualizar la lista.');
+      else setLoadError(getErrorMessage(err, 'Error al cargar anuncios'));
     } finally {
-      setLoading(false);
+      if (mounted.current && version === readVersion.current) setLoading(false);
     }
   }
 
-  async function handleMarkRead(id) {
-    await announcementService.markAsRead(id);
-    load();
-  }
-
-  async function handleDelete(id) {
-    if (!confirm('¿Eliminar este anuncio?')) return;
-    await announcementService.delete(id);
-    load();
+  async function changeRow(id, remove) {
+    if (operations.current.has(id)) return;
+    if (remove && !confirm('¿Eliminar este anuncio?')) return;
+    operations.current.add(id);
+    setPendingRows(rows => ({ ...rows, [id]: true }));
+    setRowErrors(errors => ({ ...errors, [id]: '' }));
+    let committed = false;
+    try {
+      if (remove) await announcementService.delete(id);
+      else await announcementService.markAsRead(id);
+      if (!mounted.current) return;
+      readVersion.current += 1;
+      needsReadback.current = true;
+      setAnnouncements(rows => remove ? rows.filter(row => row.id !== id) : rows.map(row => row.id === id ? { ...row, is_new: false } : row));
+      committed = true;
+    } catch (err) {
+      if (mounted.current) setRowErrors(errors => ({ ...errors, [id]: getErrorMessage(err, remove ? 'No se pudo eliminar el anuncio' : 'No se pudo marcar como leído') }));
+    } finally {
+      operations.current.delete(id);
+      if (mounted.current) setPendingRows(rows => ({ ...rows, [id]: false }));
+    }
+    if (committed) await load();
   }
 
   async function handleCreate(e) {
     e.preventDefault();
+    if (operations.current.has('create')) return;
+    operations.current.add('create');
+    setCreating(true);
     setMsg('');
+    let committed = false;
     try {
-      await announcementService.create(form);
+      const { data } = await announcementService.create(form);
+      if (!mounted.current) return;
+      readVersion.current += 1;
+      needsReadback.current = true;
+      setAnnouncements(rows => [data, ...rows.filter(row => row.id !== data.id)]);
+      setLoaded(true);
       setForm({ title: '', message: '' });
       setShowForm(false);
       setPage(1);
-      load();
+      committed = true;
     } catch (err) {
-      setMsg(getErrorMessage(err, 'Error al crear'));
+      if (mounted.current) setMsg(getErrorMessage(err, 'Error al crear'));
+    } finally {
+      operations.current.delete('create');
+      if (mounted.current) setCreating(false);
     }
+    // A page change triggers the same versioned read through the effect.
+    if (committed && currentPage.current === 1) await load(1);
   }
-
-  if (loading) return <div style={s.container}><Spinner /></div>;
 
   return (
     <div style={s.container}>
       <h2 style={s.heading}>Anuncios</h2>
-      {isAdmin && <button style={s.newBtn} onClick={() => setShowForm(!showForm)}>{showForm ? 'Cancelar' : '+ Nuevo anuncio'}</button>}
+      {isAdmin && <button style={s.newBtn} disabled={creating} onClick={() => setShowForm(!showForm)}>{showForm ? 'Cancelar' : '+ Nuevo anuncio'}</button>}
+      {loading && <div role="status"><Spinner />Cargando anuncios…</div>}
+      {(loadError || readbackError) && <div role="alert"><p>{loadError || readbackError}</p><button style={s.readBtn} onClick={() => load()}>Reintentar anuncios</button></div>}
       {showForm && (
         <form onSubmit={handleCreate} style={s.form}>
           {msg && <p style={s.msg}>{msg}</p>}
-          <input name="title" placeholder="Título" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required style={s.input} />
-          <textarea name="message" placeholder="Mensaje" value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} required rows={3} style={{ ...s.input, resize: 'vertical' }} />
-          <button type="submit" style={s.submitBtn}>Publicar</button>
+          <input name="title" aria-label="Título" placeholder="Título" disabled={creating} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} required style={s.input} />
+          <textarea name="message" aria-label="Mensaje" placeholder="Mensaje" disabled={creating} value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} required rows={3} style={{ ...s.input, resize: 'vertical' }} />
+          <button type="submit" disabled={creating} style={s.submitBtn}>{creating ? 'Publicando…' : 'Publicar'}</button>
         </form>
       )}
-      {announcements.length === 0 ? <p style={s.empty}>No hay anuncios.</p> : (
+      {announcements.length === 0 ? (loaded && !loading && !loadError && !readbackError && <p style={s.empty}>No hay anuncios.</p>) : (
         announcements.map(a => (
           <div key={a.id} style={{ ...s.card, opacity: a.is_new === true ? 1 : 0.7 }}>
             <div style={s.cardHeader}>
@@ -77,11 +133,12 @@ export default function Anuncios() {
               {a.is_new === true && <span style={s.newBadge}>Nuevo</span>}
             </div>
             <p style={s.cardMessage}>{a.message}</p>
+            {rowErrors[a.id] && <p role="alert">{rowErrors[a.id]}</p>}
             <div style={s.cardFooter}>
               <small style={s.cardDate}>{new Date(a.created_at).toLocaleDateString('es-AR')}{a.created_by_email && ` · ${a.created_by_email}`}</small>
               <div style={{ display: 'flex', gap: '0.4rem' }}>
-                {!isAdmin && a.is_new === true && <button style={s.readBtn} onClick={() => handleMarkRead(a.id)}>Marcar leído</button>}
-                {isAdmin && <button style={{ ...s.readBtn, color: '#dc3545' }} onClick={() => handleDelete(a.id)}>Eliminar</button>}
+                {!isAdmin && a.is_new === true && <button style={s.readBtn} disabled={Boolean(pendingRows[a.id])} onClick={() => changeRow(a.id, false)}>Marcar leído</button>}
+                {isAdmin && <button style={{ ...s.readBtn, color: '#dc3545' }} disabled={Boolean(pendingRows[a.id])} onClick={() => changeRow(a.id, true)}>Eliminar</button>}
               </div>
             </div>
           </div>

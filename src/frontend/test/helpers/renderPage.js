@@ -15,7 +15,7 @@ export function content(node) {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   return (Array.isArray(node) ? node : [node?.props?.children].flat()).filter(x => x != null).map(content).join('');
 }
-export async function renderPage(name, boundaries) {
+export async function renderPage(name, boundaries, browser = {}) {
   const slots = [], effects = [], writes = [];
   let cursor = 0, mounted = true;
   const react = {
@@ -52,7 +52,8 @@ export async function renderPage(name, boundaries) {
     b.onLoad({ filter: /.*/, namespace: 'empty' }, () => ({ contents: '' }));
   } }] });
   const module = { exports: {} };
-  vm.runInNewContext(result.outputFiles[0].text, { module, exports: module.exports, mocks, console, FormData, window: { confirm: () => false, innerWidth: 1366, addEventListener() {}, removeEventListener() {} } });
+  const window = { confirm: () => false, innerWidth: 1366, addEventListener() {}, removeEventListener() {}, ...browser };
+  vm.runInNewContext(result.outputFiles[0].text, { module, exports: module.exports, mocks, console, FormData, window, confirm: window.confirm });
   let tree;
   const render = () => {
     cursor = 0; tree = module.exports.default();
