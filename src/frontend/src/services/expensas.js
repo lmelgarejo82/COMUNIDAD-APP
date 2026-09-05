@@ -1,49 +1,53 @@
-import api from './api';
+import api from './api.js';
 
-export const expenseService = {
-  create(data) {
-    return api.post('/expenses', data);
-  },
+export function createExpenseService(client = api) {
+  return {
+    create(data) {
+      return client.post('/expenses', data);
+    },
 
-  listAll(page = 1) {
-    return api.get('/expenses', { params: { page, limit: 10 } });
-  },
+    listAll(page = 1) {
+      return client.get('/expenses', { params: { page, limit: 10 } });
+    },
 
-  listMy() {
-    return api.get('/expenses/my');
-  },
+    listMy() {
+      return client.get('/expenses/my');
+    },
 
-  getUnitExpenses(expenseId, status) {
-    const params = status ? { status } : {};
-    return api.get(`/expenses/${expenseId}/units`, { params });
-  },
+    getUnitExpenses(expenseId, status) {
+      const params = status ? { status } : {};
+      return client.get(`/expenses/${expenseId}/units`, { params });
+    },
 
-  listAllUnits(status) {
-    const params = status ? { status } : {};
-    return api.get('/expenses/units', { params });
-  },
+    listAllUnits(status) {
+      const params = status ? { status } : {};
+      return client.get('/expenses/units', { params });
+    },
 
-  update(id, data) {
-    return api.put(`/expenses/${id}`, data);
-  },
+    update(id, data) {
+      return client.put(`/expenses/${id}`, data);
+    },
 
-  uploadFile(expenseId, file) {
-    const formData = new FormData();
-    formData.append('file', file);
-    return api.post(`/expenses/${expenseId}/upload-file`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-  },
+    uploadFile(expenseId, file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      return client.post(`/expenses/${expenseId}/upload-file`, formData);
+    },
 
-  submitPayment(unitExpenseId, file) {
-    const formData = new FormData();
-    if (file) formData.append('proof', file);
-    return api.put(`/expenses/unit/${unitExpenseId}/pay`, formData, {
-      headers: file ? { 'Content-Type': 'multipart/form-data' } : {},
-    });
-  },
+    submitPayment(unitExpenseId, file) {
+      const formData = new FormData();
+      formData.append('proof', file);
+      return client.put(`/expenses/unit/${unitExpenseId}/pay`, formData);
+    },
 
-  confirmPayment(unitExpenseId) {
-    return api.put(`/expenses/unit/${unitExpenseId}/confirm`);
-  },
-};
+    confirmPayment(unitExpenseId) {
+      return client.put(`/expenses/unit/${unitExpenseId}/confirm`);
+    },
+
+    rejectPayment(unitExpenseId) {
+      return client.put(`/expenses/unit/${unitExpenseId}/reject`);
+    },
+  };
+}
+
+export const expenseService = createExpenseService();

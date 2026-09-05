@@ -1,6 +1,6 @@
 # Controlled pilot readiness — 2026-09-05
 
-This records verified behavior, not a production certification. B36.1A account lifecycle verification covers `9027180`; the payment, visible-feature and full-pilot acceptance gates are separate subsequent blocks.
+This records verified behavior, not a production certification. B36.1A account lifecycle verification covers `9027180`; the manual-payment block has now completed implementation and live acceptance, while visible-feature and full-pilot gates remain separate subsequent blocks.
 
 ## Account lifecycle gate
 
@@ -23,6 +23,19 @@ Registration and reset consume fragment credentials in memory, immediately remov
 Registration and Reset invalidate superseded requests on credential replacement/unmount. Deferred component and browser checks prove an old success/error cannot change session, navigation, messages or the newer request's loading state. This suppresses obsolete client effects, not already-started server transactions. Temporary response mocks were removed; running Nginx configuration was compared with the repository and matched exactly. The log regression now waits for the actual synthetic upstream through the proxy with a bounded, credential-free readiness probe.
 
 Git checkout now preserves LF for shell scripts and SQL migrations. A fresh Windows `core.autocrlf=true` checkout is tested. No migration/checksum algorithm or stored history was rewritten: all26 applied checksums inspected during diagnosis matched committed LF bytes and none matched the accidental CRLF checkout. The rebuilt backend subsequently accepted all31 current migrations.
+
+## Manual payment gate
+
+- Backend: **316 passed, 0 failed, 4 intentionally skipped** out of 320 tests. Frontend: **34 passed, 0 failed**; production build successful. The optional PostgreSQL and real-Redis cases remain covered by their separate integration gates.
+- A fresh non-seeded resident was onboarded through the admin invitation UI and the Mailpit-delivered fragment flow. Two fresh QA communities used the same visible unit label with actual distinct database IDs.
+- The browser workflow completed resident upload → authenticated admin download → rejection → resident retry → approval → resident sees **Pagado**. The UI presents manual proof as the pilot path, requires PDF/JPG/JPEG/PNG up to 5 MiB, omits the unavailable MercadoPago entry, exposes per-row loading/error/success, and preserves proof/status on metadata edits. Amount redistribution with payment activity surfaced the backend `409` and left the edit form visible.
+- Admin approval is available only for `in_review` rows with an associated proof. An actual proofless historical `in_review` fixture exposed only explicit rejection recovery; paid/proofless history was not mislabeled as a failed payment.
+- The configured upload boundary is inclusive. A real multipart regression first reproduced `413` for exactly 5 MiB in proof, expense attachment, ticket, announcement and the equivalent 10 MiB Document route. The corrected transport threshold accepts every exact product maximum with its full byte count; maximum+1 still returns `413` before controller work and leaves no file. Live Nginx verification repeated 5 MiB = `200`/5,242,880 persisted bytes and 5 MiB+1 = `413` with the association unchanged.
+- An authenticated 33-byte proof download was byte-for-byte identical before and after backend recreation, and the same admin session remained authorized. The named upload volume retained the proof while protected runtime configuration was verified unchanged.
+- Existing foreign IDs were used for all isolation checks: foreign submission, proof download and review returned safe `404`; resident and `access_operator` review returned `403`. Expired ownership returned `404`, preserved the existing association and left no upload candidate. Normal desktop 1366×768 and mobile 390×844 journeys had no horizontal overflow, transport failure, unexpected `5xx` or `429`; expected `409`/`413`/`404`/`403` negatives were counted separately.
+- Exact payment QA cleanup removed 2 expense headers, 3 invitations, 7 users, 4 units and both complete community hierarchies. Post-cleanup database evidence returned zero markers and restored the unrelated aggregate to **20 paid, 10 pending, 0 proofs**; the upload volume again contained only `.gitkeep` at 0 bytes. Mailpit was removed, default SMTP settings restored and public health returned `200`.
+
+During the preceding backend task, an attempted local rebuild replaced the ephemeral container's runtime auth configuration. The operational impact was limited to prior local JWT sessions requiring login again: **0 live visitor invitations were affected and no database data was rewritten**. The controller corrected the runtime to independent 48-byte CSPRNG keys and the verified localhost public origin. Their values are never recorded here; every later rebuild/recreation used the protected helper and proved those values remained identical. Future operators must preserve, never regenerate, these runtime values during routine rebuilds.
 
 ## External SMTP gate
 
