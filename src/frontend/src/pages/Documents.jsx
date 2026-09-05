@@ -3,6 +3,7 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { getErrorMessage } from '../services/errors';
 import Spinner from '../components/Spinner';
+import { downloadProtectedUpload } from '../services/protectedUploads';
 
 export default function Documents() {
   const { user } = useAuth();
@@ -13,18 +14,48 @@ export default function Documents() {
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [downloads, setDownloads] = useState({});
+  const requests = useRef(new Map());
+  const alive = useRef(false);
+  const listRequest = useRef(0);
   const fileRef = useRef(null);
   const isAdmin = user?.role === 'admin';
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    alive.current = true;
+    load();
+    return () => { alive.current = false; listRequest.current += 1; requests.current.clear(); };
+  }, []);
 
   async function load() {
+    const request = ++listRequest.current;
     setLoading(true);
+    setLoadError('');
     try {
       const { data } = await api.get('/documents');
-      setDocs(data);
-    } catch { setMsg('Error al cargar documentos'); }
-    finally { setLoading(false); }
+      if (alive.current && request === listRequest.current) setDocs(data);
+    } catch { if (alive.current && request === listRequest.current) setLoadError('Error al cargar documentos'); }
+    finally { if (alive.current && request === listRequest.current) setLoading(false); }
+  }
+
+  async function handleDownload(doc) {
+    if (requests.current.has(doc.id)) return;
+    const request = Symbol();
+    requests.current.set(doc.id, request);
+    const current = () => alive.current && requests.current.get(doc.id) === request;
+    setDownloads(prev => ({ ...prev, [doc.id]: { busy: true, error: '' } }));
+    let error = '';
+    try {
+      await downloadProtectedUpload(doc.file_url, `documento-${Number(doc.id)}.pdf`);
+    } catch (err) {
+      error = getErrorMessage(err, 'Error al descargar documento');
+    } finally {
+      if (current()) {
+        requests.current.delete(doc.id);
+        setDownloads(prev => ({ ...prev, [doc.id]: { busy: false, error } }));
+      }
+    }
   }
 
   async function handleUpload(e) {
@@ -70,7 +101,7 @@ export default function Documents() {
         </form>
       )}
 
-      {docs.length === 0 ? <p style={s.empty}>No hay documentos.</p> : (
+      {loadError ? <div role="alert"><p>{loadError}</p><button onClick={load} style={s.submitBtn}>Reintentar</button></div> : docs.length === 0 ? <p style={s.empty}>No hay documentos.</p> : (
         docs.map((d) => (
           <div key={d.id} style={s.card}>
             <strong>{d.title}</strong>
@@ -78,6 +109,10 @@ export default function Documents() {
             <small style={s.docMeta}>
               Subido por {d.uploaded_by_email || 'admin'} · {new Date(d.created_at).toLocaleDateString('es-AR')}
             </small>
+            <button onClick={() => handleDownload(d)} disabled={Boolean(downloads[d.id]?.busy)} style={s.submitBtn}>
+              {downloads[d.id]?.busy ? 'Descargando...' : 'Descargar PDF'}
+            </button>
+            {downloads[d.id]?.error && <p role="alert">{downloads[d.id].error}</p>}
           </div>
         ))
       )}
