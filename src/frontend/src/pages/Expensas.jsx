@@ -409,6 +409,8 @@ function AdminView() {
       loadExpenses(false, false),
     ]);
     if (!isCurrentDetailRead(expense.id, generation, readGeneration)) return false;
+    // The current read also owns loading inherited from an initial read or retry.
+    setUnitsLoading(false);
 
     const detailSucceeded = detailResult.status === 'fulfilled';
     const refreshedExpense = listResult.status === 'fulfilled' && Array.isArray(listResult.value)
@@ -457,7 +459,6 @@ function AdminView() {
     const readGeneration = beginDetailRead();
     setUnitsLoading(true);
     await reconcileCurrent(expense, generation, null, null, readGeneration);
-    if (isCurrentDetailRead(expense.id, generation, readGeneration)) setUnitsLoading(false);
   }
 
   function startEditing() {

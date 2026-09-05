@@ -871,6 +871,97 @@ test('admin applies committed approve and reject rows even when reconciliation r
   assert.equal(textContent(harness.tree()).includes('No pudimos actualizar los datos'), false);
 });
 
+for (const currentReadFails of [false, true]) {
+  test(`admin automatic reconciliation releases superseded retry loading on ${currentReadFails ? 'failure' : 'success'}`, async () => {
+    // Without loading release by the newest reconciliation, both settled rows stay hidden.
+    const expense = { id: 8, description: 'Agosto', fixed_amount: 200, extra_amount: 0, amount: 200, due_date: '2026-09-30' };
+    const reviewRows = [
+      { id: 41, unit_number: '1A', amount_owed: 100, status: 'in_review', payment_proof_url: '/uploads/a.pdf' },
+      { id: 42, unit_number: '1B', amount_owed: 100, status: 'in_review', payment_proof_url: '/uploads/b.pdf' },
+    ];
+    const committedRows = [{ ...reviewRows[0], status: 'paid' }, { ...reviewRows[1], status: 'rejected' }];
+    const authoritativeRows = committedRows.map(row => ({ ...row, amount_owed: 120 }));
+    const approval = deferred();
+    const rejection = deferred();
+    const heldRetry = deferred();
+    const automaticRead = deferred();
+    let detailCalls = 0;
+    const harness = await renderExpensas({
+      user: { role: 'admin' },
+      adminExpenses: [expense],
+      serviceOverrides: {
+        getUnitExpenses: () => {
+          detailCalls += 1;
+          if (detailCalls === 1) return Promise.resolve({ data: { units: reviewRows } });
+          if (detailCalls === 2) return Promise.reject(new Error('First readback unavailable'));
+          if (detailCalls === 3) return heldRetry.promise;
+          if (detailCalls === 4) return automaticRead.promise;
+          return Promise.resolve({ data: { units: authoritativeRows } });
+        },
+        confirmPayment: () => approval.promise,
+        rejectPayment: () => rejection.promise,
+      },
+    });
+    try {
+      const expenseRow = allNodes(harness.tree(), node => node?.type === 'div' && node.props?.onClick && textContent(node).includes('Agosto'))[0];
+      await expenseRow.props.onClick();
+      await settleComponent(harness);
+      const findRow = unit => allNodes(harness.tree(), node => node?.type === 'tr' && textContent(node).includes(unit))[0];
+      const approve = nodeByText(findRow('1A'), 'button', 'Aprobar');
+      assert.equal(approve.props.disabled, false);
+      const pendingApproval = approve.props.onClick();
+      harness.render();
+      const reject = nodeByText(findRow('1B'), 'button', 'Rechazar');
+      assert.equal(reject.props.disabled, false);
+      const pendingRejection = reject.props.onClick();
+      approval.resolve({ data: committedRows[0] });
+      await pendingApproval;
+      await settleComponent(harness);
+      assert.equal(nodeByText(findRow('1B'), 'button', 'Rechazando...').props.disabled, true);
+      const retry = nodeByText(harness.tree(), 'button', 'Reintentar actualización');
+      assert.ok(retry);
+      assert.equal(Boolean(retry.props.disabled), false);
+      const pendingRetry = retry.props.onClick();
+      await settleComponent(harness);
+      assert.equal(nodeByText(harness.tree(), 'button', 'Editar expensa').props.disabled, true);
+
+      rejection.resolve({ data: committedRows[1] });
+      await settleComponent(harness);
+      assert.equal(detailCalls, 4);
+      if (currentReadFails) automaticRead.reject(new Error('Current readback unavailable'));
+      else automaticRead.resolve({ data: { units: authoritativeRows } });
+      await pendingRejection;
+      // The obsolete retry returns pre-commit rows after the current reader finishes.
+      heldRetry.resolve({ data: { units: reviewRows } });
+      await Promise.all([pendingApproval, pendingRejection, pendingRetry]);
+      await settleComponent(harness);
+
+      assert.ok(findRow('1A'), 'all reads settled: loading must end and expose the paid row');
+      assert.ok(findRow('1B'), 'all reads settled: loading must end and expose the rejected row');
+      assert.equal(textContent(findRow('1A')).includes('Pagado'), true);
+      assert.equal(textContent(findRow('1B')).includes('Rechazado'), true);
+      assert.equal(textContent(findRow('1A')).includes(currentReadFails ? '$100' : '$120'), true);
+      assert.equal(textContent(harness.tree()).includes('No pudimos actualizar los datos'), currentReadFails);
+      assert.equal(Boolean(nodeByText(harness.tree(), 'button', 'Reintentar actualización')), currentReadFails);
+      assert.equal(Boolean(nodeByText(findRow('1A'), 'button', 'Aprobar')), false);
+      assert.equal(Boolean(nodeByText(findRow('1B'), 'button', 'Rechazar')), false);
+      assert.equal(nodeByText(harness.tree(), 'button', 'Editar expensa').props.disabled, false);
+      assert.equal(nodeByText(findRow('1B'), 'button', 'Descargar comprobante').props.disabled, currentReadFails);
+
+      if (currentReadFails) {
+        await nodeByText(harness.tree(), 'button', 'Reintentar actualización').props.onClick();
+        await settleComponent(harness);
+        assert.equal(textContent(findRow('1A')).includes('$120'), true);
+        assert.equal(textContent(findRow('1B')).includes('Rechazado'), true);
+        assert.equal(Boolean(nodeByText(harness.tree(), 'button', 'Reintentar actualización')), false);
+        assert.equal(nodeByText(findRow('1B'), 'button', 'Descargar comprobante').props.disabled, false);
+      }
+    } finally {
+      harness.unmount();
+    }
+  });
+}
+
 test('late review, edit and download completions cannot replace a reopened expense', async () => {
   const expenseA = { id: 8, description: 'Expensa A', fixed_amount: 100, extra_amount: 0, amount: 100, due_date: '2026-09-30' };
   const expenseB = { id: 9, description: 'Expensa B', fixed_amount: 200, extra_amount: 0, amount: 200, due_date: '2026-10-30' };
