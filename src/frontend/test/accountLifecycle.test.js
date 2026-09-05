@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAccountRecoveryService } from '../src/services/accountRecovery.js';
-import { consumeFragmentToken } from '../src/utils/fragmentToken.js';
+import { consumeFragmentToken, subscribeFragmentToken } from '../src/utils/fragmentToken.js';
 import { validateResetPassword, resetPasswordErrorMessage } from '../src/utils/passwordReset.js';
 import {
   addResendingInvite,
@@ -77,6 +77,94 @@ test('fragment token is decoded once and safely encoded for the API path', async
     '/auth/reset-password/token%2Fwith%20spaces%2B%252F',
     { password: 'Secure123!' },
   ]]);
+});
+
+function fragmentWindow(hash = '') {
+  const events = new EventTarget();
+  const replacements = [];
+  let lastListener;
+  const windowLike = {
+    location: { hash, pathname: '/reset-password', search: '?source=email' },
+    history: {
+      replaceState: (...args) => {
+        replacements.push(args);
+        windowLike.location.hash = '';
+        events.dispatchEvent(new Event('hashchange'));
+      },
+    },
+    addEventListener: (type, listener) => {
+      lastListener = listener;
+      events.addEventListener(type, listener);
+    },
+    removeEventListener: (type, listener) => events.removeEventListener(type, listener),
+    get localStorage() { assert.fail('must not access localStorage'); },
+    get sessionStorage() { assert.fail('must not access sessionStorage'); },
+  };
+  return {
+    windowLike,
+    replacements,
+    dispatchHashChange: () => events.dispatchEvent(new Event('hashchange')),
+    dispatchQueuedListener: () => lastListener(),
+  };
+}
+
+test('mounted fragment subscription synchronously cleans and delivers each new token once', () => {
+  const browser = fragmentWindow();
+  const delivered = [];
+  const unsubscribe = subscribeFragmentToken(browser.windowLike, (token) => {
+    assert.equal(browser.windowLike.location.hash, '', 'cleanup precedes memory callback');
+    delivered.push(token);
+    browser.dispatchHashChange();
+  });
+
+  assert.deepEqual(delivered, []);
+  browser.windowLike.location.hash = '#token=next%2Ftoken%2B%252F';
+  browser.dispatchHashChange();
+  browser.dispatchHashChange();
+  browser.windowLike.location.hash = '#token=another-token';
+  browser.dispatchHashChange();
+
+  assert.deepEqual(delivered, ['next/token+%2F', 'another-token']);
+  assert.deepEqual(browser.replacements, [
+    [null, '', '/reset-password?source=email'],
+    [null, '', '/reset-password?source=email'],
+  ]);
+  unsubscribe();
+});
+
+test('fragment subscription consumes a router-updated fragment when installed without a hashchange event', () => {
+  const browser = fragmentWindow('#token=router-token');
+  const delivered = [];
+  const unsubscribe = subscribeFragmentToken(browser.windowLike, token => delivered.push(token));
+
+  assert.deepEqual(delivered, ['router-token']);
+  assert.deepEqual(browser.replacements, [[null, '', '/reset-password?source=email']]);
+  unsubscribe();
+});
+
+test('fragment unsubscribe blocks queued callbacks and leaves later fragments untouched', () => {
+  const browser = fragmentWindow();
+  const unsubscribe = subscribeFragmentToken(browser.windowLike, () => assert.fail('must not update unmounted component'));
+  unsubscribe();
+  unsubscribe();
+  browser.windowLike.location.hash = '#token=after-unmount';
+  browser.dispatchHashChange();
+  browser.dispatchQueuedListener();
+
+  assert.equal(browser.windowLike.location.hash, '#token=after-unmount');
+  assert.deepEqual(browser.replacements, []);
+});
+
+test('fragment subscription does not consume another route token before unmount cleanup', () => {
+  const browser = fragmentWindow();
+  const unsubscribe = subscribeFragmentToken(browser.windowLike, () => assert.fail('must not consume another route token'));
+  browser.windowLike.location.pathname = '/register';
+  browser.windowLike.location.hash = '#token=invitation-token';
+  browser.dispatchHashChange();
+
+  assert.equal(browser.windowLike.location.hash, '#token=invitation-token');
+  assert.deepEqual(browser.replacements, []);
+  unsubscribe();
 });
 
 test('reset validation blocks missing token, empty fields, short and mismatched passwords', () => {

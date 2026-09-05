@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useLayoutEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import accountRecovery from '../services/accountRecovery';
-import { consumeFragmentToken } from '../utils/fragmentToken';
+import { consumeFragmentToken, subscribeFragmentToken } from '../utils/fragmentToken';
 import { INVALID_RESET_LINK, resetPasswordErrorMessage, validateResetPassword } from '../utils/passwordReset';
 
 export default function ResetPassword() {
@@ -11,6 +11,12 @@ export default function ResetPassword() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useLayoutEffect(() => subscribeFragmentToken(window, (token) => {
+    setResetToken(token);
+    setError('');
+  }), [location]);
 
   async function handleSubmit(event) {
     event.preventDefault();
