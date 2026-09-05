@@ -1,10 +1,13 @@
-import { useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import accountRecovery from '../services/accountRecovery';
 import { consumeFragmentToken, subscribeFragmentToken } from '../utils/fragmentToken';
+import { createLatestRequestTracker, runLatestRequest } from '../utils/latestRequest';
 import { INVALID_RESET_LINK, resetPasswordErrorMessage, validateResetPassword } from '../utils/passwordReset';
 
 export default function ResetPassword() {
+  const requestTrackerRef = useRef(null);
+  if (!requestTrackerRef.current) requestTrackerRef.current = createLatestRequestTracker();
   const [resetToken, setResetToken] = useState(() => consumeFragmentToken(window));
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
@@ -13,10 +16,21 @@ export default function ResetPassword() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  useLayoutEffect(() => subscribeFragmentToken(window, (token) => {
-    setResetToken(token);
-    setError('');
-  }), [location]);
+  useLayoutEffect(() => {
+    const unsubscribe = subscribeFragmentToken(window, (token) => {
+      requestTrackerRef.current.invalidate();
+      setResetToken(token);
+      setPassword('');
+      setConfirmation('');
+      setError('');
+      setLoading(false);
+    });
+
+    return () => {
+      requestTrackerRef.current.invalidate();
+      unsubscribe();
+    };
+  }, [location]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -28,15 +42,18 @@ export default function ResetPassword() {
     }
     setError('');
     setLoading(true);
-    try {
-      await accountRecovery.reset(resetToken, password);
-      setResetToken(null);
-      navigate('/login', { replace: true, state: { passwordReset: true } });
-    } catch (err) {
-      setError(resetPasswordErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
+    await runLatestRequest(
+      requestTrackerRef.current,
+      () => accountRecovery.reset(resetToken, password),
+      {
+        onSuccess: () => {
+          setResetToken(null);
+          navigate('/login', { replace: true, state: { passwordReset: true } });
+        },
+        onError: (err) => setError(resetPasswordErrorMessage(err)),
+        onFinally: () => setLoading(false),
+      }
+    );
   }
 
   const message = resetToken ? error : INVALID_RESET_LINK;

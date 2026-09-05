@@ -39,6 +39,29 @@ async function waitUntilReachable(origin) {
   assert.fail('isolated frontend container must become reachable');
 }
 
+async function waitUntilBackendReady(origin) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${origin}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-test-readiness': 'true',
+        },
+        body: '{}',
+        signal: AbortSignal.timeout(500),
+      });
+      await response.arrayBuffer();
+      if (response.status === 204) return;
+    } catch {
+      // The isolated listener may not have bound its port yet.
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.fail('isolated backend must become ready through the shipped proxy');
+}
+
 async function postJson(origin, requestPath, body, headers = {}) {
   try {
     const response = await fetch(`${origin}${requestPath}`, {
@@ -77,8 +100,17 @@ test('shipped Nginx keeps reset credentials out of proxy and application logs', 
 
   const backendScript = [
     "const http = require('http');",
+    "let readinessChecked = false;",
     "http.createServer((req, res) => {",
     "  console.log(req.url);",
+    "  if (req.url === '/api/auth/reset-password' && !readinessChecked) {",
+    "    req.resume();",
+    "    req.on('end', () => {",
+    "      if (req.headers['x-test-readiness']) readinessChecked = true;",
+    "      res.writeHead(503); res.end();",
+    "    });",
+    "    return;",
+    "  }",
     "  if (req.url.includes('synthetic-failed-') || req.headers['x-test-upstream-failure']) {",
     "    req.socket.destroy(); return;",
     "  }",
@@ -122,6 +154,7 @@ test('shipped Nginx keeps reset credentials out of proxy and application logs', 
   assertDockerSucceeded(portResult, 'isolated frontend port must be discoverable');
   const origin = `http://127.0.0.1:${portResult.stdout.trim()}`;
   await waitUntilReachable(origin);
+  await waitUntilBackendReady(origin);
 
   const password = 'Synthetic-password-1!';
   const pathCases = [
