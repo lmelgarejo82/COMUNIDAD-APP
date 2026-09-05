@@ -7,7 +7,6 @@ function createAuthRoutes({ authLimiter, passwordRecoveryLimiter }) {
   router.post('/login', authLimiter, authController.login);
   router.post('/forgot-password', passwordRecoveryLimiter, authController.forgotPassword);
   router.post('/reset-password', passwordRecoveryLimiter, authController.resetPasswordFromBody);
-  router.post('/reset-password/:token', passwordRecoveryLimiter, authController.resetPassword);
   return router;
 }
 

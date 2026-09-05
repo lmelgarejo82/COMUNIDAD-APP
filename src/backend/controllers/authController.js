@@ -243,8 +243,3 @@ exports.resetPasswordFromBody = async (req, res) => {
   const body = req.body || {};
   return resetPasswordWithToken(body.token, body.password, res);
 };
-
-exports.resetPassword = async (req, res) => {
-  const body = req.body || {};
-  return resetPasswordWithToken(req.params?.token, body.password, res);
-};

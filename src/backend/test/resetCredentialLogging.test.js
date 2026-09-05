@@ -14,69 +14,192 @@ function runDocker(args, options = {}) {
   });
 }
 
-function extractLocationBlock(configuration, marker) {
-  const start = configuration.indexOf(marker);
-  if (start === -1) return null;
-
-  const openBrace = configuration.indexOf('{', start);
-  if (openBrace === -1) return null;
-
-  let depth = 0;
-  for (let index = openBrace; index < configuration.length; index += 1) {
-    if (configuration[index] === '{') depth += 1;
-    if (configuration[index] === '}') depth -= 1;
-    if (depth === 0) return configuration.slice(start, index + 1);
-  }
-  return null;
+function assertDockerSucceeded(result, message) {
+  assert.ifError(result.error);
+  assert.equal(result.status === 0, true, message);
 }
 
-function buildFrontendImage(t) {
+function buildFrontendImage() {
   const tag = `comunidad-reset-log-test-${process.pid}-${Date.now()}`;
   const build = runDocker(['build', '--quiet', '--tag', tag, frontendDirectory]);
-
-  assert.ifError(build.error);
-  assert.equal(build.status, 0, 'frontend Docker image must build for effective Nginx validation');
-
-  t.after(() => {
-    const image = runDocker(['image', 'inspect', tag]);
-    if (image.status === 0) runDocker(['image', 'rm', '--force', tag]);
-  });
-
+  assertDockerSucceeded(build, 'frontend Docker image must build for behavioral Nginx validation');
   return tag;
 }
 
-test('effective frontend Nginx configuration disables access logging for legacy reset credentials', (t) => {
+async function waitUntilReachable(origin) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      const response = await fetch(origin);
+      await response.arrayBuffer();
+      return;
+    } catch {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  assert.fail('isolated frontend container must become reachable');
+}
+
+async function postJson(origin, requestPath, body, headers = {}) {
+  try {
+    const response = await fetch(`${origin}${requestPath}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    });
+    await response.arrayBuffer();
+    return response.status;
+  } catch {
+    assert.fail('isolated proxy request must complete');
+  }
+}
+
+test('shipped Nginx keeps reset credentials out of proxy and application logs', async (t) => {
   const available = runDocker(['version', '--format', '{{.Server.Version}}'], { timeout: 10000 });
-  assert.ifError(available.error);
-  assert.equal(available.status, 0, 'Docker is required for effective Nginx validation');
+  assertDockerSucceeded(available, 'Docker is required for behavioral Nginx validation');
 
-  const image = buildFrontendImage(t);
-  const inspected = runDocker([
-    'run',
-    '--rm',
-    '--add-host',
-    'backend:127.0.0.1',
-    '--entrypoint',
-    'nginx',
-    image,
-    '-T',
+  const suffix = `${process.pid}-${Date.now()}`;
+  const network = `comunidad-reset-log-${suffix}`;
+  const backend = `comunidad-reset-backend-${suffix}`;
+  const frontend = `comunidad-reset-frontend-${suffix}`;
+  const image = buildFrontendImage();
+
+  t.after(() => {
+    runDocker(['rm', '--force', frontend]);
+    runDocker(['rm', '--force', backend]);
+    runDocker(['network', 'rm', network]);
+    runDocker(['image', 'rm', '--force', image]);
+  });
+
+  assertDockerSucceeded(
+    runDocker(['network', 'create', network]),
+    'isolated reset-log network must be created'
+  );
+
+  const backendScript = [
+    "const http = require('http');",
+    "http.createServer((req, res) => {",
+    "  console.log(req.url);",
+    "  if (req.url.includes('synthetic-failed-') || req.headers['x-test-upstream-failure']) {",
+    "    req.socket.destroy(); return;",
+    "  }",
+    "  req.resume();",
+    "  req.on('end', () => {",
+    "    const realIp = req.headers['x-real-ip'];",
+    "    const forwardedFor = req.headers['x-forwarded-for'];",
+    "    const trustedHeaders = Boolean(realIp) && realIp === forwardedFor",
+    "      && !forwardedFor.includes(',') && req.headers['x-forwarded-proto'] === 'http';",
+    "    res.writeHead(trustedHeaders ? 204 : 418); res.end();",
+    "  });",
+    "}).listen(3000, '0.0.0.0');",
+  ].join('\n');
+  assertDockerSucceeded(
+    runDocker([
+      'run', '--detach',
+      '--name', backend,
+      '--network', network,
+      '--network-alias', 'backend',
+      'node:22-alpine',
+      'node', '-e', backendScript,
+    ]),
+    'safe synthetic backend must start in the isolated network'
+  );
+  assertDockerSucceeded(
+    runDocker([
+      'run', '--detach', '--rm',
+      '--name', frontend,
+      '--network', network,
+      '--publish', '127.0.0.1::80',
+      image,
+    ]),
+    'shipped frontend container must start in the isolated network'
+  );
+
+  const portResult = runDocker([
+    'inspect',
+    '--format', '{{(index (index .NetworkSettings.Ports "80/tcp") 0).HostPort}}',
+    frontend,
   ]);
+  assertDockerSucceeded(portResult, 'isolated frontend port must be discoverable');
+  const origin = `http://127.0.0.1:${portResult.stdout.trim()}`;
+  await waitUntilReachable(origin);
 
-  assert.ifError(inspected.error);
-  assert.equal(inspected.status, 0, 'effective Nginx configuration must be valid');
-  const configuration = `${inspected.stdout}\n${inspected.stderr}`;
-  const legacyLocation = extractLocationBlock(
-    configuration,
-    'location ^~ /api/auth/reset-password/'
-  );
-  const bodyLocation = extractLocationBlock(
-    configuration,
-    'location = /api/auth/reset-password'
-  );
+  const password = 'Synthetic-password-1!';
+  const pathCases = [
+    ['/api/auth/reset-password/synthetic-lowercase-credential', 'synthetic-lowercase-credential'],
+    ['/api/auth/RESET-PASSWORD/synthetic-uppercase-credential', 'synthetic-uppercase-credential'],
+    ['/api/auth/ReSeT-PaSsWoRd/synthetic-mixed-credential', 'synthetic-mixed-credential'],
+    ['/api/auth/%72eset-password/synthetic-encoded-credential', 'synthetic-encoded-credential'],
+  ];
+  const upstreamFailureCases = [
+    ['/api/auth/reset-password/synthetic-failed-lowercase', 'synthetic-failed-lowercase'],
+    ['/api/auth/RESET-PASSWORD/synthetic-failed-uppercase', 'synthetic-failed-uppercase'],
+    ['/api/auth/ReSeT-PaSsWoRd/synthetic-failed-mixed', 'synthetic-failed-mixed'],
+    ['/api/auth/reset%2Dpassword/synthetic-failed-encoded', 'synthetic-failed-encoded'],
+  ];
+  const bodyCredential = 'synthetic-body-credential';
+  const queryCredential = 'synthetic-query-credential';
+  const trailingQueryCredential = 'synthetic-trailing-query-credential';
+  const failingBodyCredential = 'synthetic-failing-body-credential';
+  const failingBodyQueryCredential = 'synthetic-failing-body-query-credential';
 
-  assert.equal(Boolean(legacyLocation), true, 'legacy reset path must have an explicit effective location');
-  assert.equal(/\baccess_log\s+off\s*;/.test(legacyLocation || ''), true);
-  assert.equal(/\bproxy_pass\s+http:\/\/backend:3000\s*;/.test(legacyLocation || ''), true);
-  assert.equal(Boolean(bodyLocation), true, 'body reset path must avoid the legacy prefix redirect');
-  assert.equal(/\bproxy_pass\s+http:\/\/backend:3000\s*;/.test(bodyLocation || ''), true);
+  const pathStatuses = [];
+  for (const [requestPath] of pathCases) {
+    pathStatuses.push(await postJson(origin, requestPath, { password }));
+  }
+  const bodyStatus = await postJson(origin, '/api/auth/reset-password', {
+    token: bodyCredential,
+    password,
+  });
+  const queryStatus = await postJson(
+    origin,
+    `/api/auth/reset-password?token=${queryCredential}`,
+    { token: bodyCredential, password }
+  );
+  const trailingStatus = await postJson(
+    origin,
+    `/api/auth/reset-password/?token=${trailingQueryCredential}`,
+    { token: bodyCredential, password }
+  );
+  const failingBodyStatus = await postJson(
+    origin,
+    `/api/auth/reset-password?token=${failingBodyQueryCredential}`,
+    { token: failingBodyCredential, password },
+    { 'x-test-upstream-failure': 'true' }
+  );
+  const upstreamFailureStatuses = [];
+  for (const [requestPath] of upstreamFailureCases) {
+    upstreamFailureStatuses.push(await postJson(origin, requestPath, { password }));
+  }
+
+  const frontendLogs = runDocker(['logs', frontend]);
+  const backendLogs = runDocker(['logs', backend]);
+  assertDockerSucceeded(frontendLogs, 'frontend logs must be inspectable');
+  assertDockerSucceeded(backendLogs, 'synthetic application logs must be inspectable');
+  const capturedLogs = `${frontendLogs.stdout}${frontendLogs.stderr}${backendLogs.stdout}${backendLogs.stderr}`;
+  const credentials = [
+    ...pathCases.map(([, credential]) => credential),
+    ...upstreamFailureCases.map(([, credential]) => credential),
+    bodyCredential,
+    queryCredential,
+    trailingQueryCredential,
+    failingBodyCredential,
+    failingBodyQueryCredential,
+    password,
+  ];
+
+  assert.equal(
+    upstreamFailureStatuses.every(status => status === 404),
+    true,
+    'URL-token variants must not reach a failing upstream'
+  );
+  assert.equal(
+    credentials.some(credential => capturedLogs.includes(credential)),
+    false,
+    'raw reset credentials must be absent from access, error, and application logs'
+  );
+  assert.equal(pathStatuses.every(status => status === 404), true, 'URL-token reset variants must be rejected');
+  assert.equal(bodyStatus === 204, true, 'body-only reset must still reach the backend');
+  assert.equal(queryStatus === 204, true, 'body reset with a query must still reach the backend safely');
+  assert.equal(trailingStatus === 204, true, 'trailing-slash body reset must still reach the backend safely');
+  assert.equal(failingBodyStatus === 502, true, 'body reset must exercise the protected upstream-error path');
 });
