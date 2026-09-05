@@ -3,7 +3,8 @@ async function handleUploadError(error, req, res, next) {
 
   const multerError = error?.name === 'MulterError';
   const malformedMultipart = error instanceof Error
-    && /multipart|unexpected end of form/i.test(error.message);
+    && (/multipart|unexpected end of form/i.test(error.message)
+      || error.message === 'Malformed part header');
   if (!multerError && !malformedMultipart) return next(error);
 
   try {

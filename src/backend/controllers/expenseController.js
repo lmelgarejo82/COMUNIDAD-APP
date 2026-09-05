@@ -68,6 +68,30 @@ async function notifyPaymentApproval(unit, communityId) {
   }
 }
 
+async function notifyExpenseCreated(unitExpenseEntries, { communityId, description, dueDate }) {
+  try {
+    const unitUsers = await pool.query(
+      `SELECT phone, unit_number FROM users
+       WHERE community_id = $1 AND unit_number IS NOT NULL AND unit_number != ''`,
+      [communityId]
+    );
+    for (const unitExpense of unitExpenseEntries) {
+      const unitUser = unitUsers.rows.find((row) => row.unit_number === unitExpense.unit_number);
+      if (unitUser?.phone) {
+        whatsapp.sendExpenseNotification({
+          toPhone: unitUser.phone,
+          unitNumber: unitExpense.unit_number,
+          description,
+          amount: unitExpense.amount_owed.toFixed(2),
+          dueDate,
+        }).catch(() => {});
+      }
+    }
+  } catch {
+    console.error('No se pudo procesar la notificación opcional de la expensa creada.');
+  }
+}
+
 function calculateUnitAmounts(units, fixedAmt, extraAmt) {
   const weights = units.map(u => {
     if (u.coef_percent) return parseFloat(u.coef_percent) / 100;
@@ -154,28 +178,9 @@ exports.create = async (req, res) => {
     commitAttempted = true;
     await client.query('COMMIT');
     transactionOpen = false;
-
-    try {
-      const unitUsers = await pool.query(
-        `SELECT phone, unit_number FROM users
-         WHERE community_id = $1 AND unit_number IS NOT NULL AND unit_number != ''`,
-        [req.communityId]
-      );
-      for (const ue of unitExpenseEntries) {
-        const unitUser = unitUsers.rows.find((row) => row.unit_number === ue.unit_number);
-        if (unitUser?.phone) {
-          whatsapp.sendExpenseNotification({
-            toPhone: unitUser.phone,
-            unitNumber: ue.unit_number,
-            description,
-            amount: ue.amount_owed.toFixed(2),
-            dueDate: due_date,
-          }).catch(() => {});
-        }
-      }
-    } catch {
-      console.error('No se pudo procesar la notificación opcional de la expensa creada.');
-    }
+    const committedClient = client;
+    client = null;
+    committedClient.release();
 
     res.status(201).json({
       expense,
@@ -184,6 +189,11 @@ exports.create = async (req, res) => {
       total_amount: totalAmount,
     });
     invalidatePattern('dashboard:*').catch(() => {});
+    void notifyExpenseCreated(unitExpenseEntries, {
+      communityId: req.communityId,
+      description,
+      dueDate: due_date,
+    });
   } catch (err) {
     if (client && transactionOpen && !commitAttempted) {
       discardClient = !(await rollbackSafely(client));
@@ -375,10 +385,13 @@ async function reviewPayment(req, res, action) {
     commitAttempted = true;
     await client.query('COMMIT');
     transactionOpen = false;
+    const committedClient = client;
+    client = null;
+    committedClient.release();
 
-    if (action === 'approve') await notifyPaymentApproval(unit, req.communityId);
     res.json(updated);
     invalidatePattern('dashboard:*').catch(() => {});
+    if (action === 'approve') void notifyPaymentApproval(unit, req.communityId);
   } catch {
     if (client && transactionOpen && !commitAttempted) {
       discardClient = !(await rollbackSafely(client));

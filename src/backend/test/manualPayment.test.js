@@ -32,6 +32,20 @@ function response() {
   };
 }
 
+async function settlesWithin(promise, timeoutMs = 100) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('controller response stalled')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function makeClient({ commitError = null } = {}) {
   const events = [];
   const releases = [];
@@ -404,6 +418,97 @@ test('committed review remains successful when optional delivery fails', async (
   assert.deepEqual(client.events, ['BEGIN', 'COMMIT']);
 });
 
+test('manual approval releases its transaction client before bounded lookup and does not await stalled delivery', async () => {
+  const client = makeClient();
+  const events = client.events;
+  let released = false;
+  client.release = (discard) => {
+    released = true;
+    client.releases.push(discard);
+    events.push('RELEASE');
+  };
+  const controller = loadController({
+    client,
+    Expense: {
+      async lockExpenseForUnitExpense() { return { id: 9 }; },
+      async findReviewableUnitExpense() {
+        return {
+          id: 41,
+          status: 'in_review',
+          payment_proof_url: '/uploads/proof.pdf',
+          unit_number: 'A-1',
+          amount_owed: '1500.00',
+        };
+      },
+      async transitionManualReview() { return { id: 41, status: 'paid' }; },
+    },
+    poolQuery: async () => {
+      events.push('OPTIONAL_LOOKUP');
+      if (!released) return new Promise(() => {});
+      return { rows: [{ phone: 'synthetic-phone' }] };
+    },
+    whatsapp: {
+      async sendPaymentConfirmation() {
+        events.push('STALLED_DELIVERY');
+        return new Promise(() => {});
+      },
+    },
+  });
+  const res = response();
+  const originalJson = res.json;
+  res.json = function json(body) {
+    events.push('RESPONSE');
+    return originalJson.call(this, body);
+  };
+
+  await settlesWithin(controller.confirmPayment({
+    params: { unitExpenseId: '41' },
+    user: { id: 2, role: 'admin' },
+    communityId: 7,
+  }, res));
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(client.releases, [undefined]);
+  assert.equal(events.indexOf('COMMIT') < events.indexOf('RELEASE'), true);
+  assert.equal(events.indexOf('RELEASE') < events.indexOf('RESPONSE'), true);
+  assert.equal(events.indexOf('RESPONSE') < events.indexOf('OPTIONAL_LOOKUP'), true);
+  assert.equal(events.includes('STALLED_DELIVERY'), true);
+});
+
+test('manual approval preserves ambiguous COMMIT discard without optional lookup or double release', async () => {
+  const client = makeClient({ commitError: new Error('connection dropped during commit') });
+  let optionalLookups = 0;
+  const controller = loadController({
+    client,
+    Expense: {
+      async lockExpenseForUnitExpense() { return { id: 9 }; },
+      async findReviewableUnitExpense() {
+        return {
+          id: 41,
+          status: 'in_review',
+          payment_proof_url: '/uploads/proof.pdf',
+          unit_number: 'A-1',
+          amount_owed: '1500.00',
+        };
+      },
+      async transitionManualReview() { return { id: 41, status: 'paid' }; },
+    },
+    poolQuery: async () => { optionalLookups += 1; return { rows: [] }; },
+  });
+  const res = response();
+
+  await controller.confirmPayment({
+    params: { unitExpenseId: '41' },
+    user: { id: 2, role: 'admin' },
+    communityId: 7,
+  }, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(client.releases, [true]);
+  assert.equal(optionalLookups, 0);
+});
+
 test('amount resplit rejects proof or payment activity before deleting children', async () => {
   const client = makeClient();
   let deletes = 0;
@@ -496,6 +601,95 @@ test('expense creation returns 201 after commit when optional delivery lookup fa
   assert.deepEqual(client.events, ['BEGIN', 'COMMIT']);
 });
 
+test('expense creation releases its transaction client before bounded lookup and does not await stalled delivery', async () => {
+  const client = makeClient();
+  const events = client.events;
+  let released = false;
+  client.release = (discard) => {
+    released = true;
+    client.releases.push(discard);
+    events.push('RELEASE');
+  };
+  const Expense = {
+    async getDistinctUnits() { return ['A-1']; },
+    async create(payload) { return { id: 9, ...payload }; },
+    async createUnitExpenses(id, entries) {
+      return entries.map((entry, index) => ({ id: index + 1, ...entry }));
+    },
+  };
+  loadController({
+    client,
+    Expense,
+    poolQuery: async () => {
+      events.push('OPTIONAL_LOOKUP');
+      if (!released) return new Promise(() => {});
+      return { rows: [{ phone: 'synthetic-phone', unit_number: 'A-1' }] };
+    },
+    whatsapp: {
+      async sendExpenseNotification() {
+        events.push('STALLED_DELIVERY');
+        return new Promise(() => {});
+      },
+    },
+  });
+  mockModule(require.resolve('../models/User'), {
+    User: { async findById() { return { id: 2, community_id: 7 }; } },
+  });
+  delete require.cache[controllerPath];
+  const controller = require('../controllers/expenseController');
+  const res = response();
+  const originalJson = res.json;
+  res.json = function json(body) {
+    events.push('RESPONSE');
+    return originalJson.call(this, body);
+  };
+
+  await settlesWithin(controller.create({
+    body: { description: 'Septiembre', fixedAmount: 100, extraAmount: 0, due_date: '2026-09-10' },
+    user: { id: 2, role: 'admin' },
+    communityId: 7,
+  }, res));
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(client.releases, [undefined]);
+  assert.equal(events.indexOf('COMMIT') < events.indexOf('RELEASE'), true);
+  assert.equal(events.indexOf('RELEASE') < events.indexOf('RESPONSE'), true);
+  assert.equal(events.indexOf('RESPONSE') < events.indexOf('OPTIONAL_LOOKUP'), true);
+  assert.equal(events.includes('STALLED_DELIVERY'), true);
+});
+
+test('expense creation preserves ambiguous COMMIT discard without optional lookup or double release', async () => {
+  const client = makeClient({ commitError: new Error('connection dropped during commit') });
+  let optionalLookups = 0;
+  const Expense = {
+    async getDistinctUnits() { return ['A-1']; },
+    async create(payload) { return { id: 9, ...payload }; },
+    async createUnitExpenses(id, entries) { return entries; },
+  };
+  loadController({
+    client,
+    Expense,
+    poolQuery: async () => { optionalLookups += 1; return { rows: [] }; },
+  });
+  mockModule(require.resolve('../models/User'), {
+    User: { async findById() { return { id: 2, community_id: 7 }; } },
+  });
+  delete require.cache[controllerPath];
+  const controller = require('../controllers/expenseController');
+  const res = response();
+
+  await controller.create({
+    body: { description: 'Septiembre', fixedAmount: 100, extraAmount: 0, due_date: '2026-09-10' },
+    user: { id: 2, role: 'admin' },
+    communityId: 7,
+  }, res);
+
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(client.releases, [true]);
+  assert.equal(optionalLookups, 0);
+});
+
 test('expense create and update return a server error when the transaction client cannot be acquired', async () => {
   const client = makeClient();
   const Expense = { async getDistinctUnits() { return ['A-1']; } };
@@ -578,6 +772,81 @@ function requestMultipart(server, route, { filename, content, terminateBoundary 
   });
 }
 
+function requestRawMultipart(server, route, boundary, body) {
+  return new Promise((resolve, reject) => {
+    const address = server.address();
+    const req = http.request({
+      host: '127.0.0.1',
+      port: address.port,
+      method: 'PUT',
+      path: route,
+      headers: {
+        'content-type': `multipart/form-data; boundary=${boundary}`,
+        'content-length': body.length,
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+async function requestMultipartAfterFileWritten(server, route, boundary, firstChunk, finalChunk, uploadRoot) {
+  const bodyLength = firstChunk.length + finalChunk.length;
+  let resolveResponse;
+  let rejectResponse;
+  const responsePromise = new Promise((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+  const address = server.address();
+  const req = http.request({
+    host: '127.0.0.1',
+    port: address.port,
+    method: 'PUT',
+    path: route,
+    headers: {
+      'content-type': `multipart/form-data; boundary=${boundary}`,
+      'content-length': bodyLength,
+    },
+  }, (res) => {
+    const chunks = [];
+    res.on('data', (chunk) => chunks.push(chunk));
+    res.on('end', () => resolveResponse({
+      statusCode: res.statusCode,
+      body: Buffer.concat(chunks).toString('utf8'),
+    }));
+  });
+  req.on('error', rejectResponse);
+  req.write(firstChunk);
+
+  let observedCandidate = false;
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline) {
+    if (fs.readdirSync(uploadRoot).some((filename) => filename.endsWith('.pdf'))) {
+      observedCandidate = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  req.end(finalChunk);
+  return { ...(await responsePromise), observedCandidate };
+}
+
+test('upload error mapper leaves genuine storage failures on the server-error path', async () => {
+  const { handleUploadError } = require('../middleware/uploadErrors');
+  const error = new Error('synthetic storage failure');
+  let forwarded = null;
+  const res = { headersSent: false, status() { throw new Error('must not map storage failure'); } };
+
+  await handleUploadError(error, {}, res, (received) => { forwarded = received; });
+
+  assert.equal(forwarded, error);
+});
+
 test('real manual upload middleware accepts canonical proof and maps invalid multipart/size to 4xx without residue', async () => {
   const uploadRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-proof-route-'));
   const previousUploadDir = process.env.UPLOAD_DIR;
@@ -656,6 +925,38 @@ test('real manual upload middleware accepts canonical proof and maps invalid mul
       terminateBoundary: false,
     });
     assert.equal(malformed.statusCode, 400);
+    assert.deepEqual(fs.readdirSync(uploadRoot), []);
+
+    const malformedBoundary = 'malformed-header-boundary';
+    const malformedHeader = await requestRawMultipart(
+      server,
+      '/api/expenses/unit/41/pay',
+      malformedBoundary,
+      Buffer.from(`--${malformedBoundary}\r\nInvalid Header\r\n\r\nbody\r\n--${malformedBoundary}--\r\n`)
+    );
+    assert.equal(malformedHeader.statusCode, 400);
+    assert.deepEqual(fs.readdirSync(uploadRoot), []);
+
+    const partialBoundary = 'valid-then-malformed-boundary';
+    const validPart = Buffer.from(
+      `--${partialBoundary}\r\n`
+      + 'Content-Disposition: form-data; name="proof"; filename="partial.pdf"\r\n'
+      + 'Content-Type: application/pdf\r\n\r\n'
+      + `synthetic proof\r\n--${partialBoundary}\r\n`
+    );
+    const malformedPart = Buffer.from(
+      `Invalid Header\r\n\r\nbroken\r\n--${partialBoundary}--\r\n`
+    );
+    const validThenMalformed = await requestMultipartAfterFileWritten(
+      server,
+      '/api/expenses/unit/41/pay',
+      partialBoundary,
+      validPart,
+      malformedPart,
+      uploadRoot
+    );
+    assert.equal(validThenMalformed.observedCandidate, true);
+    assert.equal(validThenMalformed.statusCode, 400);
     assert.deepEqual(fs.readdirSync(uploadRoot), []);
 
     const deniedReview = await requestMultipart(server, '/api/expenses/unit/41/confirm', {
