@@ -6,6 +6,7 @@ import { useCommunity } from '../context/CommunityContext';
 import {
   addResendingInvite,
   createInviteRequestTracker,
+  inviteListViewState,
   inviteStatusLabel,
   partitionInvites,
   removeResendingInvite,
@@ -143,6 +144,7 @@ export default function InviteResidente() {
   }
 
   const { pending, history } = partitionInvites(invites);
+  const listViewState = inviteListViewState(listLoading, listError, invites);
 
   function renderInviteCard(invite) {
     const isResending = resendingIds.has(invite.id);
@@ -197,9 +199,9 @@ export default function InviteResidente() {
       <section style={s.listSection} aria-labelledby="invite-management-heading">
         <h3 id="invite-management-heading" style={s.subheading}>Gestión de invitaciones</h3>
         {listError && <p style={{ ...s.msg, ...s.error }}>{listError}</p>}
-        {listLoading ? (
+        {listViewState === 'loading' ? (
           <p style={s.emptyState}>Cargando invitaciones...</p>
-        ) : (
+        ) : listViewState.startsWith('loaded-') ? (
           <>
             <h4 style={s.sectionHeading}>Pendientes</h4>
             {pending.length > 0 ? (
@@ -215,7 +217,7 @@ export default function InviteResidente() {
               <p style={s.emptyState}>Todavía no hay invitaciones en el historial.</p>
             )}
           </>
-        )}
+        ) : null}
       </section>
     </div>
   );

@@ -10,6 +10,7 @@ import {
   partitionInvites,
   removeResendingInvite,
 } from '../src/utils/invitePresentation.js';
+import * as invitePresentation from '../src/utils/invitePresentation.js';
 
 test('account recovery service sends only the email on forgot request', async () => {
   const calls = [];
@@ -200,6 +201,18 @@ test('invite presentation separates pending from immutable history', () => {
     pending: [rows[0]],
     history: [rows[1], rows[2]],
   });
+});
+
+test('invite list failure suppresses empty-state claims', () => {
+  assert.equal(
+    typeof invitePresentation.inviteListViewState,
+    'function',
+    'invite list rendering must derive one exclusive loading, error, or ready state'
+  );
+  assert.equal(invitePresentation.inviteListViewState(true, ''), 'loading');
+  assert.equal(invitePresentation.inviteListViewState(false, 'Error del servidor'), 'error');
+  assert.equal(invitePresentation.inviteListViewState(false, '', []), 'loaded-empty');
+  assert.equal(invitePresentation.inviteListViewState(false, '', [{ id: 1 }]), 'loaded-data');
 });
 
 test('invite status labels expose only user-facing state', () => {
