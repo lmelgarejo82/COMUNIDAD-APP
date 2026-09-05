@@ -216,12 +216,13 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-exports.resetPassword = async (req, res) => {
+async function resetPasswordWithToken(token, password, res) {
   try {
-    const { token } = req.params;
-    const { password } = req.body;
+    if (typeof token !== 'string' || token.length === 0) {
+      return res.status(400).json({ error: 'Token inválido o expirado' });
+    }
 
-    if (!password || password.length < 6) {
+    if (typeof password !== 'string' || password.length < 6) {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     }
 
@@ -232,8 +233,18 @@ exports.resetPassword = async (req, res) => {
     }
 
     res.json({ message: 'Contraseña actualizada correctamente' });
-  } catch (err) {
-    console.error('Error en resetPassword:', err);
+  } catch {
+    console.error('Error en resetPassword');
     res.status(500).json({ error: 'Error interno del servidor' });
   }
+}
+
+exports.resetPasswordFromBody = async (req, res) => {
+  const body = req.body || {};
+  return resetPasswordWithToken(body.token, body.password, res);
+};
+
+exports.resetPassword = async (req, res) => {
+  const body = req.body || {};
+  return resetPasswordWithToken(req.params?.token, body.password, res);
 };

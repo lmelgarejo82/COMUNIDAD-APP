@@ -6,7 +6,7 @@ export function createAccountRecoveryService(client = api) {
       return client.post('/auth/forgot-password', { email });
     },
     reset(token, password) {
-      return client.post(`/auth/reset-password/${encodeURIComponent(token)}`, { password });
+      return client.post('/auth/reset-password', { token, password });
     },
   };
 }

@@ -7,8 +7,10 @@ const invitePath = require.resolve('../models/Invite');
 const dbPath = require.resolve('../db');
 const bcryptPath = require.resolve('bcryptjs');
 const accountEmailPath = require.resolve('../services/accountEmail');
+const authRoutesPath = require.resolve('../routes/auth');
 const crypto = require('node:crypto');
 const jwt = require('jsonwebtoken');
+const express = require('express');
 
 function mockModule(modulePath, exports) {
   require.cache[modulePath] = { id: modulePath, filename: modulePath, loaded: true, exports };
@@ -37,6 +39,45 @@ function loadController(user, sendPasswordResetEmail) {
   mockModule(bcryptPath, { hash: async () => 'password-hash', compare: async () => true });
   mockModule(accountEmailPath, { sendPasswordResetEmail });
   return require(controllerPath);
+}
+
+function passThroughLimiter(req, res, next) {
+  next();
+}
+
+function loadAuthRouter(user) {
+  loadController(user, async () => ({}));
+  delete require.cache[authRoutesPath];
+  const createAuthRoutes = require(authRoutesPath);
+  return createAuthRoutes({
+    authLimiter: passThroughLimiter,
+    passwordRecoveryLimiter: passThroughLimiter,
+  });
+}
+
+async function postJson(router, requestPath, body) {
+  const app = express();
+  app.use(express.json());
+  app.use(router);
+
+  const server = await new Promise((resolve, reject) => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+    listener.once('error', reject);
+  });
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}${requestPath}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const responseBody = response.headers.get('content-type')?.includes('application/json')
+      ? await response.json()
+      : null;
+    return { status: response.status, body: responseBody };
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 test('forgot-password ignores hostile Host headers and uses only configured origin', async () => {
@@ -191,6 +232,73 @@ test('expired or already consumed reset token keeps the generic invalid-token co
 
   assert.equal(res.statusCode, 400);
   assert.deepEqual(res.body, { error: 'Token inválido o expirado' });
+});
+
+test('body reset route consumes the JSON credential with the established success contract', async () => {
+  const resetToken = 'body-token/with spaces+%2F';
+  let consumed;
+  const router = loadAuthRouter({
+    consumeResetToken: async (tokenHash, passwordHash) => {
+      consumed = { tokenHash, passwordHash };
+      return { id: 23, auth_version: 1 };
+    },
+  });
+
+  const result = await postJson(router, '/reset-password', {
+    token: resetToken,
+    password: 'Secure123!',
+  });
+
+  assert.equal(result.status === 200, true, 'body reset route must be available');
+  assert.equal(result.body?.message === 'Contraseña actualizada correctamente', true);
+  assert.equal(
+    consumed?.tokenHash === crypto.createHash('sha256').update(resetToken).digest('hex'),
+    true,
+    'only the reset-token hash may reach persistence'
+  );
+  assert.equal(consumed?.passwordHash === 'password-hash', true);
+});
+
+test('body reset route rejects a missing JSON credential without accepting a query credential', async () => {
+  let consumeCalls = 0;
+  const router = loadAuthRouter({
+    consumeResetToken: async () => {
+      consumeCalls += 1;
+      return { id: 24, auth_version: 1 };
+    },
+  });
+
+  const result = await postJson(router, '/reset-password?token=synthetic-query-token', {
+    password: 'Secure123!',
+  });
+
+  assert.equal(result.status === 400, true, 'only a JSON body credential may be consumed');
+  assert.equal(result.body?.error === 'Token inválido o expirado', true);
+  assert.equal(consumeCalls === 0, true, 'query credentials must not reach reset consumption');
+});
+
+test('legacy reset route preserves URL-encoded credential compatibility', async () => {
+  const resetToken = 'legacy-token/with spaces+%2F';
+  let consumed;
+  const router = loadAuthRouter({
+    consumeResetToken: async (tokenHash, passwordHash) => {
+      consumed = { tokenHash, passwordHash };
+      return { id: 25, auth_version: 2 };
+    },
+  });
+
+  const result = await postJson(router, `/reset-password/${encodeURIComponent(resetToken)}`, {
+    password: 'Secure123!',
+  });
+
+  assert.equal(result.status === 200, true, 'legacy reset route must remain available');
+  assert.equal(result.body?.message === 'Contraseña actualizada correctamente', true);
+  assert.equal(
+    consumed?.tokenHash === crypto.createHash('sha256').update(resetToken).digest('hex'),
+    true,
+    'legacy credentials must retain their decoded value before hashing'
+  );
+  assert.equal(consumed?.passwordHash === 'password-hash', true);
 });
 
 test('reset database failure remains a server failure', async () => {

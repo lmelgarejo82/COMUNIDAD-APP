@@ -22,18 +22,22 @@ test('account recovery service sends only the email on forgot request', async ()
   assert.deepEqual(calls, [['/auth/forgot-password', { email: 'resident@example.test' }]]);
 });
 
-test('account recovery service sends the encoded token only in the reset path', async () => {
+test('account recovery service sends the reset credential only in the JSON body', async () => {
   const calls = [];
   const service = createAccountRecoveryService({
     post: async (...args) => { calls.push(args); return { data: { message: 'updated' } }; },
   });
 
-  await service.reset('token/with spaces', 'Secure123!');
+  const resetToken = 'token/with spaces';
+  const password = 'Secure123!';
+  await service.reset(resetToken, password);
 
-  assert.deepEqual(calls, [[
-    '/auth/reset-password/token%2Fwith%20spaces',
-    { password: 'Secure123!' },
-  ]]);
+  assert.equal(calls.length, 1);
+  const [url, body] = calls[0];
+  assert.equal(url === '/auth/reset-password', true, 'reset URL must not contain a credential');
+  assert.deepEqual(Object.keys(body).sort(), ['password', 'token']);
+  assert.equal(body.token === resetToken, true, 'reset body must contain the supplied credential');
+  assert.equal(body.password === password, true, 'reset body must contain the supplied password');
 });
 
 test('fragment token is returned and immediately removed without storage access', () => {
@@ -59,7 +63,7 @@ test('missing fragment token returns null and leaves the URL untouched', () => {
   }
 });
 
-test('fragment token is decoded once and safely encoded for the API path', async () => {
+test('fragment token is decoded once and sent in the reset request body', async () => {
   const calls = [];
   const windowLike = {
     location: { hash: '#token=token%2Fwith%20spaces%2B%252F', pathname: '/reset-password', search: '' },
@@ -73,10 +77,12 @@ test('fragment token is decoded once and safely encoded for the API path', async
   assert.equal(token, 'token/with spaces+%2F');
   assert.equal(consumeFragmentToken(windowLike), null);
   await service.reset(token, 'Secure123!');
-  assert.deepEqual(calls, [[
-    '/auth/reset-password/token%2Fwith%20spaces%2B%252F',
-    { password: 'Secure123!' },
-  ]]);
+  assert.equal(calls.length, 1);
+  const [url, body] = calls[0];
+  assert.equal(url === '/auth/reset-password', true, 'fragment credentials must not be placed in the URL');
+  assert.deepEqual(Object.keys(body).sort(), ['password', 'token']);
+  assert.equal(body.token === token, true, 'decoded fragment credential must be sent unchanged in the body');
+  assert.equal(body.password === 'Secure123!', true);
 });
 
 function fragmentWindow(hash = '') {
