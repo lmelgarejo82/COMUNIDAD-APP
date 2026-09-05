@@ -38,10 +38,10 @@ services:
       INVITATION_TOKEN_SECRET: ${INVITATION_TOKEN_SECRET:?Set INVITATION_TOKEN_SECRET explicitly}
       JWT_EXPIRES_IN: 7d
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL explicitly}
-      EMAIL_HOST: smtp.ethereal.email
-      EMAIL_PORT: '587'
-      EMAIL_USER: ''
-      EMAIL_PASS: ''
+      EMAIL_HOST: ${EMAIL_HOST:-smtp.ethereal.email}
+      EMAIL_PORT: '${EMAIL_PORT:-587}'
+      EMAIL_USER: '${EMAIL_USER:-}'
+      EMAIL_PASS: '${EMAIL_PASS:-}'
       SEED_DB: 'false'
       QUEUE_ENABLED: ${QUEUE_ENABLED:-true}
       REDIS_URL: redis://redis:6379
