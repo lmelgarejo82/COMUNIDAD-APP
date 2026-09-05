@@ -14,8 +14,10 @@ function hashToken(token) {
 async function rollback(client) {
   try {
     await client.query('ROLLBACK');
+    return true;
   } catch {
     console.error('Error en rollback de invitación.');
+    return false;
   }
 }
 
@@ -65,6 +67,7 @@ const Invite = {
   async rotatePending(id, communityId) {
     const client = await pool.connect();
     let transactionOpen = false;
+    let discardClient = false;
     try {
       await client.query('BEGIN');
       transactionOpen = true;
@@ -90,7 +93,7 @@ const Invite = {
         [id, communityId]
       );
       if (!rows[0]) {
-        await rollback(client);
+        discardClient = !(await rollback(client));
         transactionOpen = false;
         return null;
       }
@@ -110,10 +113,10 @@ const Invite = {
       transactionOpen = false;
       return { ...update.rows[0], status: 'pending', token };
     } catch (err) {
-      if (transactionOpen) await rollback(client);
+      if (transactionOpen) discardClient = !(await rollback(client));
       throw err;
     } finally {
-      client.release();
+      client.release(discardClient);
     }
   },
 

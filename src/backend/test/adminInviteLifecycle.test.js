@@ -195,7 +195,8 @@ function pendingRow(overrides = {}) {
 // locking with predicate re-evaluation AFTER waiting for the previous commit.
 function rotationDatabase({ row = pendingRow(), unitCommunity = 7, active = true,
   deleted = null, failAt, failRollback = false, holdFirstLock = false } = {}) {
-  const state = { row, hash: sha256('1'.repeat(64)), events: [], calls: [], inserts: 0 };
+  const state = { row, hash: sha256('1'.repeat(64)), events: [], calls: [], inserts: 0,
+    releases: [], returnedOpenTransactions: 0, operationError: new Error('database failure') };
   let lockTail = Promise.resolve();
   let clientCount = 0;
   let openFirstLock;
@@ -210,13 +211,16 @@ function rotationDatabase({ row = pendingRow(), unitCommunity = 7, active = true
       const clientId = ++clientCount;
       let unlock;
       let draft;
+      let transactionOpen = false;
       return {
         async query(sql, params) {
           sql = String(sql).trim();
           state.calls.push({ sql, params, clientId });
           if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) {
             state.events.push(sql);
-            if (sql === failAt || (sql === 'ROLLBACK' && failRollback)) throw new Error('database failure');
+            if (sql === 'ROLLBACK' && failRollback) throw new Error('rollback transport failure');
+            if (sql === failAt) throw state.operationError;
+            transactionOpen = sql === 'BEGIN';
             if (sql === 'COMMIT' && draft) Object.assign(state, draft);
             if (sql !== 'BEGIN' && unlock) { unlock(); unlock = null; }
             return { rows: [] };
@@ -234,7 +238,7 @@ function rotationDatabase({ row = pendingRow(), unitCommunity = 7, active = true
             if (clientId === 2) secondWaiting();
             await prior;
             if (clientId === 1) { firstLocked(); if (holdFirstLock) await firstGate; }
-            if (failAt === 'LOCK') throw new Error('database failure');
+            if (failAt === 'LOCK') throw state.operationError;
             const eligible = state.row && Number(params[0]) === state.row.id && params[1] === state.row.community_id
               && state.row.used !== true && state.row.expires_at > new Date()
               && unitCommunity === params[1] && active && !deleted;
@@ -245,7 +249,7 @@ function rotationDatabase({ row = pendingRow(), unitCommunity = 7, active = true
             assert.match(sql, /SET token_hash = \$1, expires_at = \$2/);
             assert.match(sql, /WHERE id = \$3 AND community_id = \$4 AND used IS NOT TRUE/);
             assert.doesNotMatch(sql, /RETURNING\s+\*|RETURNING[\s\S]*token_hash/i);
-            if (failAt === 'UPDATE') throw new Error('database failure');
+            if (failAt === 'UPDATE') throw state.operationError;
             if (failAt === 'LOST') return { rows: [] };
             assert.deepEqual(params.slice(2).map(Number), [41, 7]);
             draft = { hash: params[0], row: { ...state.row, expires_at: params[1] } };
@@ -254,7 +258,17 @@ function rotationDatabase({ row = pendingRow(), unitCommunity = 7, active = true
           if (/INSERT/.test(sql)) state.inserts++;
           throw new Error('unexpected SQL');
         },
-        release() { state.events.push('RELEASE'); if (unlock) unlock(); },
+        release(discard) {
+          state.events.push('RELEASE');
+          state.releases.push(Boolean(discard));
+          // Returning a client normally does not end an uncertain transaction.
+          if (discard) {
+            transactionOpen = false;
+            if (unlock) { unlock(); unlock = null; }
+          } else if (transactionOpen) {
+            state.returnedOpenTransactions++;
+          }
+        },
       };
     },
   };
@@ -269,6 +283,8 @@ test('rotatePending locks and updates the same local pending row with hash only'
   const started = Date.now();
   const rotated = await db.Invite.rotatePending(41, 7);
   assert.deepEqual(db.events, ['BEGIN', 'LOCK', 'UPDATE', 'COMMIT', 'RELEASE']);
+  assert.deepEqual(db.releases, [false]);
+  assert.equal(db.returnedOpenTransactions, 0);
   assert.equal(rotated.id, 41);
   assert.equal(rotated.status, 'pending');
   assert.equal(/^[a-f0-9]{64}$/.test(rotated.token), true);
@@ -293,6 +309,8 @@ for (const [name, options, id, community] of [
     const db = rotationDatabase(options);
     assert.equal(await db.Invite.rotatePending(id, community), null);
     assert.deepEqual(db.events, ['BEGIN', 'LOCK', 'ROLLBACK', 'RELEASE']);
+    assert.deepEqual(db.releases, [false]);
+    assert.equal(db.returnedOpenTransactions, 0);
   });
 }
 
@@ -303,17 +321,40 @@ for (const failAt of ['BEGIN', 'LOCK', 'UPDATE', 'LOST', 'COMMIT']) {
     assert.equal(db.hash === sha256('1'.repeat(64)), true);
     assert.equal(db.events.at(-1), 'RELEASE');
     assert.equal(db.events.includes('ROLLBACK'), failAt !== 'BEGIN');
+    assert.deepEqual(db.releases, [false]);
+    assert.equal(db.returnedOpenTransactions, 0);
   });
 }
 
-test('failed rollback cannot mask rotation failure or prevent release', async () => {
-  const db = rotationDatabase({ failAt: 'LOST', failRollback: true });
+for (const failAt of ['LOST', 'LOCK']) {
+  test(`failed rollback discards the client while preserving the ${failAt} operation error`, async () => {
+    const db = rotationDatabase({ failAt, failRollback: true });
+    const logs = [];
+    const originalError = console.error;
+    console.error = (...args) => logs.push(args);
+    try {
+      await assert.rejects(() => db.Invite.rotatePending(41, 7),
+        failAt === 'LOST' ? /INVITE_ROTATION_LOST/ : error => error === db.operationError);
+    } finally { console.error = originalError; }
+    assert.equal(db.returnedOpenTransactions, 0);
+    assert.deepEqual(db.releases, [true]);
+    assert.equal(db.events.at(-1), 'RELEASE');
+    assert.deepEqual(logs, [['Error en rollback de invitación.']]);
+  });
+}
+
+test('failed rollback after rejecting an invitation discards the client and still returns null', async () => {
+  const db = rotationDatabase({ row: null, failRollback: true });
+  const logs = [];
   const originalError = console.error;
-  console.error = () => {};
+  console.error = (...args) => logs.push(args);
   try {
-    await assert.rejects(() => db.Invite.rotatePending(41, 7), /INVITE_ROTATION_LOST/);
+    assert.equal(await db.Invite.rotatePending(41, 7), null);
   } finally { console.error = originalError; }
-  assert.equal(db.events.at(-1), 'RELEASE');
+  assert.equal(db.returnedOpenTransactions, 0);
+  assert.deepEqual(db.releases, [true]);
+  assert.deepEqual(db.events, ['BEGIN', 'LOCK', 'ROLLBACK', 'RELEASE']);
+  assert.deepEqual(logs, [['Error en rollback de invitación.']]);
 });
 
 test('concurrent rotations serialize on the same row and only the last token is accepted', async () => {
