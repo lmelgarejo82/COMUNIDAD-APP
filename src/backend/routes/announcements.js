@@ -11,6 +11,7 @@ const { logAudit } = require('../middleware/logAudit');
 const { trackUploadedFile } = require('../middleware/uploadLifecycle');
 const { handleUploadError } = require('../middleware/uploadErrors');
 const { UPLOAD_DIRECTORY } = require('../services/uploadFiles');
+const { multerFileSizeLimit } = require('../services/uploadLimits');
 
 const storage = multer.diskStorage({
   destination: UPLOAD_DIRECTORY,
@@ -26,7 +27,7 @@ const upload = multer({
     const allowed = ['.pdf', '.jpg', '.jpeg', '.png'];
     cb(null, allowed.includes(path.extname(file.originalname).toLowerCase()));
   },
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: multerFileSizeLimit(5 * 1024 * 1024) },
 });
 
 router.post('/', authenticate, authorize('admin'), setCommunity, sanitize('title', 'message'),

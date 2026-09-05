@@ -9,6 +9,7 @@ const { setCommunity } = require('../middleware/setCommunity');
 const { trackUploadedFile } = require('../middleware/uploadLifecycle');
 const { handleUploadError } = require('../middleware/uploadErrors');
 const { UPLOAD_DIRECTORY } = require('../services/uploadFiles');
+const { multerFileSizeLimit } = require('../services/uploadLimits');
 
 const storage = multer.diskStorage({
   destination: UPLOAD_DIRECTORY,
@@ -23,7 +24,7 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     cb(null, path.extname(file.originalname).toLowerCase() === '.pdf');
   },
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: multerFileSizeLimit(10 * 1024 * 1024) },
 });
 
 router.post('/', authenticate, authorize('admin'), setCommunity, upload.single('file'), trackUploadedFile, documentsController.upload, handleUploadError);
