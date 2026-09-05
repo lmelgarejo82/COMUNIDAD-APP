@@ -13,7 +13,7 @@ const announcementPath = require.resolve('../models/Announcement');
 const adminControllerPath = require.resolve('../controllers/adminController');
 const invitePath = require.resolve('../models/Invite');
 const adminComplexPath = require.resolve('../models/AdminComplex');
-const nodemailerPath = require.resolve('nodemailer');
+const accountEmailPath = require.resolve('../services/accountEmail');
 
 function mockModule(path, exports) {
   require.cache[path] = { id: path, filename: path, loaded: true, exports };
@@ -282,15 +282,12 @@ test('admin cannot delete a valid announcement from another community', async ()
   assert.deepEqual(res.body, { error: 'Anuncio no encontrado' });
 });
 
-function loadAdminController({ onQuery, inviteImpl, sendMail = async () => ({}) }) {
-  clear([adminControllerPath, invitePath, adminComplexPath, dbPath, nodemailerPath]);
+function loadAdminController({ onQuery, inviteImpl, sendResidentInviteEmail = async () => ({}) }) {
+  clear([adminControllerPath, invitePath, adminComplexPath, dbPath, accountEmailPath]);
   mockModule(invitePath, { Invite: inviteImpl });
   mockModule(adminComplexPath, { AdminComplex: {} });
   mockModule(dbPath, { pool: { query: onQuery } });
-  mockModule(nodemailerPath, {
-    createTransport: () => ({ sendMail }),
-    getTestMessageUrl: () => null,
-  });
+  mockModule(accountEmailPath, { sendResidentInviteEmail });
   return require('../controllers/adminController');
 }
 
@@ -308,7 +305,7 @@ function inviteRequest(unitId) {
 test('admin invites a unit from req.communityId without a second mutation', async () => {
   const queries = [];
   let created = null;
-  let sentMail = null;
+  let sentInvite = null;
   const { invite } = loadAdminController({
     async onQuery(sql, params) {
       queries.push([sql, params]);
@@ -320,7 +317,7 @@ test('admin invites a unit from req.communityId without a second mutation', asyn
         return { id: 80, token: 'safe-token', unit_id: 11, ...payload };
       },
     },
-    sendMail: async (mail) => { sentMail = mail; return {}; },
+    sendResidentInviteEmail: async (invite) => { sentInvite = invite; return {}; },
   });
   const res = createResponse();
 
@@ -338,9 +335,9 @@ test('admin invites a unit from req.communityId without a second mutation', asyn
   assert.equal(res.body.delivery_warning, null);
   assert.equal(Object.hasOwn(res.body, 'token'), false);
   assert.equal(Object.hasOwn(res.body, 'token_hash'), false);
-  assert.match(sentMail.html, /http:\/\/localhost\.test\/register#token=safe-token/);
-  assert.doesNotMatch(sentMail.html, /register\?token=/);
-  assert.doesNotMatch(sentMail.html, /host-attacker|forwarded-attacker/);
+  assert.match(sentInvite.inviteUrl, /http:\/\/localhost\.test\/register#token=safe-token/);
+  assert.doesNotMatch(sentInvite.inviteUrl, /register\?token=/);
+  assert.doesNotMatch(sentInvite.inviteUrl, /host-attacker|forwarded-attacker/);
 });
 
 test('SMTP failure after persistence returns success with a delivery warning and creates once', async () => {
@@ -355,7 +352,7 @@ test('SMTP failure after persistence returns success with a delivery warning and
         return { id: 82, token: 'persisted-token', unit_id: 11, ...payload };
       },
     },
-    sendMail: async () => { throw new Error('SMTP unavailable'); },
+    sendResidentInviteEmail: async () => { throw new Error('SMTP unavailable'); },
   });
   const res = createResponse();
   const originalError = console.error;
@@ -387,7 +384,7 @@ test('invite persistence failure remains a real server failure and does not atte
         throw new Error('database failure');
       },
     },
-    sendMail: async () => { emailAttempts += 1; },
+    sendResidentInviteEmail: async () => { emailAttempts += 1; },
   });
   const res = createResponse();
   const originalError = console.error;

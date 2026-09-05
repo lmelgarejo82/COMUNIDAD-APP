@@ -1,14 +1,8 @@
 const { Invite } = require('../models/Invite');
 const { AdminComplex } = require('../models/AdminComplex');
 const { pool } = require('../db');
-const nodemailer = require('nodemailer');
+const { sendResidentInviteEmail } = require('../services/accountEmail');
 const { getPublicAppOrigin } = require('../config/security');
-
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
-  port: parseInt(process.env.EMAIL_PORT || '587'),
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-});
 
 const VALID_OWNERSHIP_TYPES = new Set(['owner', 'tenant']);
 
@@ -55,24 +49,16 @@ exports.invite = async (req, res) => {
     let emailSent = false;
     let deliveryWarning = null;
     try {
-      const info = await transporter.sendMail({
-        from: '"Comunidad App" <noreply@comunidad.app>',
-        to: email,
-        subject: 'Invitación a Comunidad App',
-        html: `
-          <h2>Fuiste invitado a Comunidad App</h2>
-          <p>Hacé clic en el siguiente enlace para registrarte:</p>
-          <a href="${inviteUrl}">${inviteUrl}</a>
-          <p><strong>Unidad asignada:</strong> ${resolvedUnitNumber}</p>
-          <p><strong>Tipo:</strong> ${ownership_type === 'owner' ? 'Propietario' : 'Inquilino'}</p>
-          <p>Este enlace expira en 7 días.</p>
-        `,
+      await sendResidentInviteEmail({
+        email,
+        inviteUrl: inviteUrl.toString(),
+        unitNumber: resolvedUnitNumber,
+        ownershipType: ownership_type,
       });
       emailSent = true;
-      console.log('Email invitación enviado:', nodemailer.getTestMessageUrl(info));
-    } catch (emailError) {
+    } catch {
       deliveryWarning = 'La invitación fue creada, pero no se pudo enviar el email.';
-      console.error('Invitación persistida; falló el envío de email:', emailError);
+      console.error('Invitación persistida; falló el envío de email.');
     }
 
     res.status(201).json({

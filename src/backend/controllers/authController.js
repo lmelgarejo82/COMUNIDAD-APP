@@ -1,20 +1,11 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
+const { sendPasswordResetEmail } = require('../services/accountEmail');
 const { User, Community } = require('../models/User');
 const { Invite } = require('../models/Invite');
 const { pool } = require('../db');
 const { getJwtSecret, getPublicAppOrigin } = require('../config/security');
-
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
-  port: parseInt(process.env.EMAIL_PORT || '587'),
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
 
 const GENERIC_RESET_MESSAGE = 'Si el email existe, recibirás un enlace de restablecimiento';
 
@@ -22,26 +13,12 @@ function hashResetToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-function scheduleResetEmail({ userId, email, resetUrl }) {
+function scheduleResetEmail({ email, resetUrl }) {
   setImmediate(async () => {
     try {
-      await transporter.sendMail({
-        from: '"Comunidad App" <noreply@comunidad.app>',
-        to: email,
-        subject: 'Restablecer contraseña',
-        html: `
-          <h2>Restablecimiento de contraseña</h2>
-          <p>Hacé clic en el siguiente enlace para restablecer tu contraseña:</p>
-          <a href="${resetUrl}">${resetUrl}</a>
-          <p>Este enlace expira en 1 hora.</p>
-          <p>Si no solicitaste este cambio, ignorá este mensaje.</p>
-        `,
-      });
-    } catch (emailError) {
-      console.error('Falló la entrega de recuperación de contraseña:', {
-        user_id: userId,
-        error: emailError.message,
-      });
+      await sendPasswordResetEmail({ email, resetUrl });
+    } catch {
+      console.error('Falló la entrega de recuperación de contraseña.');
     }
   });
 }
@@ -234,7 +211,7 @@ exports.forgotPassword = async (req, res) => {
     ).toString();
 
     res.json({ message: GENERIC_RESET_MESSAGE });
-    scheduleResetEmail({ userId: user.id, email, resetUrl });
+    scheduleResetEmail({ email, resetUrl });
   } catch (err) {
     console.error('Error en forgotPassword:', err);
     res.status(500).json({ error: 'Error interno del servidor' });
