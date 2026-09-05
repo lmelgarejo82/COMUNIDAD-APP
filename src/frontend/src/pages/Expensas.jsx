@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { expenseService } from '../services/expensas';
 import { downloadProtectedUpload } from '../services/protectedUploads';
 import { useAuth } from '../context/AuthContext';
@@ -18,20 +18,59 @@ function ResidentView() {
   const [files, setFiles] = useState({});
   const [submitting, setSubmitting] = useState({});
   const [feedback, setFeedback] = useState({});
+  const [unreconciled, setUnreconciled] = useState({});
+  const mountedRef = useRef(true);
+  const loadGenerationRef = useRef(0);
+  const submitOperationsRef = useRef({});
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    load();
+    return () => {
+      mountedRef.current = false;
+      loadGenerationRef.current += 1;
+      submitOperationsRef.current = {};
+    };
+  }, []);
 
-  async function load(showSpinner = true) {
+  async function load(showSpinner = true, publishError = true) {
+    const generation = ++loadGenerationRef.current;
     if (showSpinner) setLoading(true);
-    setLoadError('');
+    if (publishError) setLoadError('');
     try {
       const { data } = await expenseService.listMy();
+      if (!mountedRef.current || generation !== loadGenerationRef.current) return false;
       setItems(data);
+      setLoadError('');
+      setUnreconciled({});
+      return true;
     } catch (err) {
-      setLoadError(getErrorMessage(err, 'Error al cargar expensas'));
+      if (!mountedRef.current || generation !== loadGenerationRef.current) return false;
+      if (publishError) setLoadError(getErrorMessage(err, 'Error al cargar expensas'));
+      return false;
     } finally {
-      if (showSpinner) setLoading(false);
+      if (showSpinner && mountedRef.current && generation === loadGenerationRef.current) {
+        setLoading(false);
+      }
     }
+  }
+
+  async function retryReconciliation(unitExpenseId) {
+    setSubmitting((current) => ({ ...current, [unitExpenseId]: true }));
+    const refreshed = await load(false, false);
+    if (!mountedRef.current) return;
+    if (!refreshed) {
+      setFeedback((current) => ({
+        ...current,
+        [unitExpenseId]: {
+          type: 'warning',
+          text: 'Comprobante enviado. No pudimos actualizar el listado. Reintentá la actualización.',
+        },
+      }));
+    } else {
+      setFeedback((current) => ({ ...current, [unitExpenseId]: null }));
+    }
+    setSubmitting((current) => ({ ...current, [unitExpenseId]: false }));
   }
 
   function selectProof(unitExpenseId, file) {
@@ -51,22 +90,51 @@ function ResidentView() {
       return;
     }
 
+    if (submitOperationsRef.current[unitExpense.id]) return;
+    const operation = Symbol(`submit:${unitExpense.id}`);
+    submitOperationsRef.current[unitExpense.id] = operation;
     setSubmitting((current) => ({ ...current, [unitExpense.id]: true }));
     setFeedback((current) => ({ ...current, [unitExpense.id]: null }));
+    let committed;
     try {
-      await expenseService.submitPayment(unitExpense.id, file);
-      setFiles((current) => ({ ...current, [unitExpense.id]: null }));
-      setFeedback((current) => ({
-        ...current,
-        [unitExpense.id]: { type: 'success', text: 'Comprobante enviado. Quedó pendiente de revisión administrativa.' },
-      }));
-      await load(false);
+      const { data } = await expenseService.submitPayment(unitExpense.id, file);
+      committed = data;
     } catch (err) {
+      if (mountedRef.current && submitOperationsRef.current[unitExpense.id] === operation) {
+        setFeedback((current) => ({
+          ...current,
+          [unitExpense.id]: { type: 'error', text: getErrorMessage(err, 'No pudimos enviar el comprobante.') },
+        }));
+        delete submitOperationsRef.current[unitExpense.id];
+        setSubmitting((current) => ({ ...current, [unitExpense.id]: false }));
+      }
+      return;
+    }
+
+    if (!mountedRef.current || submitOperationsRef.current[unitExpense.id] !== operation) return;
+    setItems((current) => current.map((item) => (
+      item.id === unitExpense.id ? { ...item, ...committed } : item
+    )));
+    setFiles((current) => ({ ...current, [unitExpense.id]: null }));
+    setFeedback((current) => ({
+      ...current,
+      [unitExpense.id]: { type: 'success', text: 'Comprobante enviado. Quedó pendiente de revisión administrativa.' },
+    }));
+    setUnreconciled((current) => ({ ...current, [unitExpense.id]: true }));
+
+    const refreshed = await load(false, false);
+    if (mountedRef.current && submitOperationsRef.current[unitExpense.id] === operation && !refreshed) {
       setFeedback((current) => ({
         ...current,
-        [unitExpense.id]: { type: 'error', text: getErrorMessage(err, 'No pudimos enviar el comprobante.') },
+        [unitExpense.id]: {
+          type: 'warning',
+          text: 'Comprobante enviado. No pudimos actualizar el listado. Reintentá la actualización.',
+        },
       }));
-    } finally {
+    }
+
+    if (mountedRef.current && submitOperationsRef.current[unitExpense.id] === operation) {
+      delete submitOperationsRef.current[unitExpense.id];
       setSubmitting((current) => ({ ...current, [unitExpense.id]: false }));
     }
   }
@@ -76,13 +144,20 @@ function ResidentView() {
   return (
     <div style={s.container}>
       <h2 style={s.heading}>Mis expensas</h2>
-      {loadError && <p role="alert" style={s.errorMsg}>{loadError}</p>}
-      {items.length === 0 ? (
+      {loadError && (
+        <div style={s.errorMsg}>
+          <p role="alert" style={s.feedbackText}>{loadError}</p>
+          <button type="button" onClick={() => load()} style={s.retryBtn}>Reintentar actualización</button>
+        </div>
+      )}
+      {!loadError && items.length === 0 ? (
         <p style={s.empty}>No tenés expensas pendientes.</p>
-      ) : (
+      ) : !loadError && (
         items.map((u) => {
           const st = manualPaymentStatus(u.status);
-          const actions = manualPaymentActions(u.status, 'residente', Boolean(u.payment_proof_url));
+          const actions = unreconciled[u.id]
+            ? []
+            : manualPaymentActions(u.status, 'residente', Boolean(u.payment_proof_url));
           const isSubmitting = Boolean(submitting[u.id]);
           const rowFeedback = feedback[u.id];
           return (
@@ -131,9 +206,19 @@ function ResidentView() {
                   </form>
                 )}
                 {rowFeedback && (
-                  <p role={rowFeedback.type === 'error' ? 'alert' : 'status'} style={rowFeedback.type === 'error' ? s.inlineError : s.inlineSuccess}>
+                  <p role={rowFeedback.type === 'error' ? 'alert' : 'status'} style={rowFeedback.type === 'error' ? s.inlineError : rowFeedback.type === 'warning' ? s.inlineWarning : s.inlineSuccess}>
                     {rowFeedback.text}
                   </p>
+                )}
+                {rowFeedback?.type === 'warning' && (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => retryReconciliation(u.id)}
+                    style={s.retryBtn}
+                  >
+                    Reintentar actualización
+                  </button>
                 )}
               </div>
             </div>
@@ -152,57 +237,211 @@ function AdminView() {
   const [unitsLoading, setUnitsLoading] = useState(false);
   const [modal, setModal] = useState(false);
   const [msg, setMsg] = useState('');
+  const [listError, setListError] = useState('');
   const [detailError, setDetailError] = useState('');
-  const [actionLoading, setActionLoading] = useState('');
+  const [detailWarning, setDetailWarning] = useState('');
+  const [busyRows, setBusyRows] = useState({});
+  const [unreconciledRows, setUnreconciledRows] = useState({});
   const [actionErrors, setActionErrors] = useState({});
   const [editing, setEditing] = useState(false);
-  const [editLoading, setEditLoading] = useState(false);
+  const [busyEdits, setBusyEdits] = useState({});
+  const [unreconciledExpenses, setUnreconciledExpenses] = useState({});
   const [editFeedback, setEditFeedback] = useState(null);
   const [editForm, setEditForm] = useState({
     description: '', fixedAmount: '', extraAmount: '', due_date: '', period: '',
   });
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const mountedRef = useRef(true);
+  const listGenerationRef = useRef(0);
+  const modalGenerationRef = useRef(0);
+  const selectedExpenseIdRef = useRef(null);
+  const busyRowsRef = useRef({});
+  const busyEditsRef = useRef({});
+  const unreconciledRowsRef = useRef({});
+  const unreconciledExpensesRef = useRef({});
+  const rowCommitVersionsRef = useRef({});
+  const committedRowsRef = useRef({});
+  const operationSequenceRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      listGenerationRef.current += 1;
+      modalGenerationRef.current += 1;
+      selectedExpenseIdRef.current = null;
+      busyRowsRef.current = {};
+      busyEditsRef.current = {};
+      unreconciledRowsRef.current = {};
+      unreconciledExpensesRef.current = {};
+      rowCommitVersionsRef.current = {};
+      committedRowsRef.current = {};
+    };
+  }, []);
 
   useEffect(() => { loadExpenses(); }, [page]);
 
-  async function loadExpenses(showSpinner = true) {
+  function isCurrentDetail(expenseId, generation) {
+    return mountedRef.current
+      && selectedExpenseIdRef.current === expenseId
+      && modalGenerationRef.current === generation;
+  }
+
+  function updateUnreconciledRows(updater) {
+    const next = updater(unreconciledRowsRef.current);
+    unreconciledRowsRef.current = next;
+    if (mountedRef.current) setUnreconciledRows(next);
+  }
+
+  function updateUnreconciledExpenses(updater) {
+    const next = updater(unreconciledExpensesRef.current);
+    unreconciledExpensesRef.current = next;
+    if (mountedRef.current) setUnreconciledExpenses(next);
+  }
+
+  async function loadExpenses(showSpinner = true, publishError = true) {
+    const generation = ++listGenerationRef.current;
     if (showSpinner) setLoading(true);
+    if (publishError) setListError('');
     try {
       const { data } = await expenseService.listAll(page);
+      if (!mountedRef.current || generation !== listGenerationRef.current) return false;
       setExpenses(data.data || []);
       setTotalPages(data.totalPages || 1);
+      setListError('');
+      return true;
     } catch (err) {
-      setMsg(getErrorMessage(err, 'Error al cargar expensas'));
+      if (!mountedRef.current || generation !== listGenerationRef.current) return false;
+      if (publishError) setListError(getErrorMessage(err, 'Error al cargar expensas'));
+      return false;
     } finally {
-      if (showSpinner) setLoading(false);
+      if (showSpinner && mountedRef.current && generation === listGenerationRef.current) {
+        setLoading(false);
+      }
     }
   }
 
-  async function loadUnitDetail(expense) {
-    const { data: raw } = await expenseService.getUnitExpenses(expense.id);
-    setUnits(raw.units || []);
-  }
-
   async function openDetail(expense) {
+    const generation = ++modalGenerationRef.current;
+    const rowVersionsAtRequest = { ...rowCommitVersionsRef.current };
+    selectedExpenseIdRef.current = expense.id;
     setSelectedExpense(expense);
+    setUnits([]);
     setUnitsLoading(true);
     setModal(true);
     setMsg('');
     setDetailError('');
+    setDetailWarning('');
     setActionErrors({});
     setEditing(false);
     setEditFeedback(null);
     try {
-      await loadUnitDetail(expense);
+      const { data: raw } = await expenseService.getUnitExpenses(expense.id);
+      if (!isCurrentDetail(expense.id, generation)) return;
+      const nextUnits = raw.units || [];
+      publishDetailRows(nextUnits, rowVersionsAtRequest);
     } catch (err) {
+      if (!isCurrentDetail(expense.id, generation)) return;
+      setUnits([]);
       setDetailError(getErrorMessage(err, 'Error al cargar detalle'));
     } finally {
-      setUnitsLoading(false);
+      if (isCurrentDetail(expense.id, generation)) setUnitsLoading(false);
     }
   }
 
+  function closeDetail() {
+    modalGenerationRef.current += 1;
+    selectedExpenseIdRef.current = null;
+    setModal(false);
+    setSelectedExpense(null);
+    setUnits([]);
+    setUnitsLoading(false);
+    setDetailError('');
+    setDetailWarning('');
+    setEditing(false);
+    setEditFeedback(null);
+  }
+
+  function beginRowOperation(unitExpenseId, action) {
+    if (busyRowsRef.current[unitExpenseId] || unreconciledRowsRef.current[unitExpenseId]) return null;
+    const operation = { id: ++operationSequenceRef.current, action };
+    busyRowsRef.current = { ...busyRowsRef.current, [unitExpenseId]: operation };
+    setBusyRows(busyRowsRef.current);
+    return operation;
+  }
+
+  function finishRowOperation(unitExpenseId, operation) {
+    if (busyRowsRef.current[unitExpenseId]?.id !== operation.id) return;
+    const next = { ...busyRowsRef.current };
+    delete next[unitExpenseId];
+    busyRowsRef.current = next;
+    if (mountedRef.current) setBusyRows(next);
+  }
+
+  function publishDetailRows(nextUnits, rowVersionsAtRequest) {
+    setUnits(nextUnits.map((unit) => {
+      const committedAfterRequest = rowCommitVersionsRef.current[unit.id] !== rowVersionsAtRequest[unit.id];
+      return committedAfterRequest
+        ? { ...unit, ...committedRowsRef.current[unit.id] }
+        : unit;
+    }));
+  }
+
+  async function reconcileCurrent(expense, generation, blockedUnitId = null, blockedVersion = null) {
+    const rowVersionsAtRequest = { ...rowCommitVersionsRef.current };
+    const [detailResult, listResult] = await Promise.allSettled([
+      expenseService.getUnitExpenses(expense.id),
+      loadExpenses(false, false),
+    ]);
+    if (!isCurrentDetail(expense.id, generation)) return false;
+
+    const detailSucceeded = detailResult.status === 'fulfilled';
+    const listSucceeded = listResult.status === 'fulfilled' && listResult.value;
+    if (detailSucceeded) {
+      const nextUnits = detailResult.value.data.units || [];
+      publishDetailRows(nextUnits, rowVersionsAtRequest);
+      setDetailError('');
+      updateUnreconciledRows((current) => {
+        const next = { ...current };
+        if (blockedUnitId) {
+          if (rowCommitVersionsRef.current[blockedUnitId] === blockedVersion) {
+            delete next[blockedUnitId];
+          }
+        } else {
+          for (const unit of nextUnits) {
+            if (rowCommitVersionsRef.current[unit.id] === rowVersionsAtRequest[unit.id]) {
+              delete next[unit.id];
+            }
+          }
+        }
+        return next;
+      });
+    }
+    if (detailSucceeded && listSucceeded) {
+      setDetailWarning('');
+      updateUnreconciledExpenses((current) => {
+        const next = { ...current };
+        delete next[expense.id];
+        return next;
+      });
+      return true;
+    }
+    setDetailWarning('No pudimos actualizar los datos. La operación fue registrada; reintentá la actualización.');
+    return false;
+  }
+
+  async function retryAdminReconciliation() {
+    if (!selectedExpense) return;
+    const expense = selectedExpense;
+    const generation = modalGenerationRef.current;
+    setUnitsLoading(true);
+    await reconcileCurrent(expense, generation);
+    if (isCurrentDetail(expense.id, generation)) setUnitsLoading(false);
+  }
+
   function startEditing() {
+    if (busyEditsRef.current[selectedExpense.id] || unreconciledExpensesRef.current[selectedExpense.id]) return;
     setEditForm({
       description: selectedExpense.description || '',
       fixedAmount: String(selectedExpense.fixed_amount ?? ''),
@@ -221,49 +460,101 @@ function AdminView() {
 
   async function submitEdit(event) {
     event.preventDefault();
-    setEditLoading(true);
+    const expense = selectedExpense;
+    const generation = modalGenerationRef.current;
+    if (!expense || busyEditsRef.current[expense.id] || unreconciledExpensesRef.current[expense.id]) return;
+    const operation = { id: ++operationSequenceRef.current };
+    busyEditsRef.current = { ...busyEditsRef.current, [expense.id]: operation };
+    setBusyEdits(busyEditsRef.current);
     setEditFeedback(null);
+    let committed;
     try {
-      const { data } = await expenseService.update(selectedExpense.id, editForm);
-      const updatedExpense = { ...selectedExpense, ...data };
-      setSelectedExpense(updatedExpense);
+      const { data } = await expenseService.update(expense.id, editForm);
+      committed = { ...expense, ...data };
+    } catch (err) {
+      if (isCurrentDetail(expense.id, generation)) {
+        setEditFeedback({ type: 'error', text: getErrorMessage(err, 'No pudimos actualizar la expensa.') });
+      }
+      const nextBusy = { ...busyEditsRef.current };
+      if (nextBusy[expense.id]?.id === operation.id) delete nextBusy[expense.id];
+      busyEditsRef.current = nextBusy;
+      if (mountedRef.current) setBusyEdits(nextBusy);
+      return;
+    }
+
+    if (!mountedRef.current) return;
+    setExpenses((current) => current.map((item) => item.id === expense.id ? { ...item, ...committed } : item));
+    updateUnreconciledExpenses((current) => ({ ...current, [expense.id]: true }));
+    if (isCurrentDetail(expense.id, generation)) {
+      setSelectedExpense(committed);
       setEditing(false);
       setEditFeedback({ type: 'success', text: 'Expensa actualizada. Los comprobantes y estados se conservaron.' });
-      await Promise.all([loadExpenses(false), loadUnitDetail(updatedExpense)]);
-    } catch (err) {
-      setEditFeedback({ type: 'error', text: getErrorMessage(err, 'No pudimos actualizar la expensa.') });
-    } finally {
-      setEditLoading(false);
+      await reconcileCurrent(committed, generation);
     }
+
+    const nextBusy = { ...busyEditsRef.current };
+    if (nextBusy[expense.id]?.id === operation.id) delete nextBusy[expense.id];
+    busyEditsRef.current = nextBusy;
+    if (mountedRef.current) setBusyEdits(nextBusy);
   }
 
   async function handleReview(unitExpense, action) {
-    const actionKey = `${unitExpense.id}:${action}`;
+    const expense = selectedExpense;
+    const generation = modalGenerationRef.current;
+    if (!expense || selectedExpenseIdRef.current !== expense.id) return;
+    const operation = beginRowOperation(unitExpense.id, action);
+    if (!operation) return;
     setMsg('');
-    setActionLoading(actionKey);
     setActionErrors((current) => ({ ...current, [unitExpense.id]: '' }));
+    let committed;
     try {
       if (action === 'approve') {
-        await expenseService.confirmPayment(unitExpense.id);
-        setMsg('Pago aprobado.');
+        const { data } = await expenseService.confirmPayment(unitExpense.id);
+        committed = data;
       } else {
-        await expenseService.rejectPayment(unitExpense.id);
-        setMsg('Comprobante rechazado. El residente puede enviar uno nuevo.');
+        const { data } = await expenseService.rejectPayment(unitExpense.id);
+        committed = data;
       }
-      await Promise.all([loadUnitDetail(selectedExpense), loadExpenses(false)]);
     } catch (err) {
-      setActionErrors((current) => ({
-        ...current,
-        [unitExpense.id]: getErrorMessage(err, action === 'approve' ? 'Error al aprobar el pago' : 'Error al rechazar el pago'),
-      }));
-    } finally {
-      setActionLoading('');
+      if (isCurrentDetail(expense.id, generation)) {
+        setActionErrors((current) => ({
+          ...current,
+          [unitExpense.id]: getErrorMessage(err, action === 'approve' ? 'Error al aprobar el pago' : 'Error al rechazar el pago'),
+        }));
+      }
+      finishRowOperation(unitExpense.id, operation);
+      return;
     }
+
+    if (!mountedRef.current) return;
+    const committedRow = { ...unitExpense, ...committed };
+    rowCommitVersionsRef.current = {
+      ...rowCommitVersionsRef.current,
+      [unitExpense.id]: operation.id,
+    };
+    committedRowsRef.current = {
+      ...committedRowsRef.current,
+      [unitExpense.id]: committedRow,
+    };
+    updateUnreconciledRows((current) => ({ ...current, [unitExpense.id]: true }));
+    if (isCurrentDetail(expense.id, generation)) {
+      setUnits((current) => current.map((unit) => (
+        unit.id === unitExpense.id ? committedRow : unit
+      )));
+      setMsg(action === 'approve'
+        ? 'Pago aprobado.'
+        : 'Comprobante rechazado. El residente puede enviar uno nuevo.');
+      await reconcileCurrent(expense, generation, unitExpense.id, operation.id);
+    }
+    finishRowOperation(unitExpense.id, operation);
   }
 
   async function handleDownload(unitExpense) {
-    const actionKey = `${unitExpense.id}:download`;
-    setActionLoading(actionKey);
+    const expense = selectedExpense;
+    const generation = modalGenerationRef.current;
+    if (!expense || selectedExpenseIdRef.current !== expense.id) return;
+    const operation = beginRowOperation(unitExpense.id, 'download');
+    if (!operation) return;
     setActionErrors((current) => ({ ...current, [unitExpense.id]: '' }));
     try {
       const extension = /\.[A-Za-z0-9]+$/.exec(unitExpense.payment_proof_url)?.[0] || '';
@@ -272,25 +563,38 @@ function AdminView() {
         `comprobante-expensa-${unitExpense.id}${extension}`
       );
     } catch (err) {
-      setActionErrors((current) => ({
-        ...current,
-        [unitExpense.id]: getErrorMessage(err, 'No pudimos descargar el comprobante.'),
-      }));
+      if (isCurrentDetail(expense.id, generation)) {
+        setActionErrors((current) => ({
+          ...current,
+          [unitExpense.id]: getErrorMessage(err, 'No pudimos descargar el comprobante.'),
+        }));
+      }
     } finally {
-      setActionLoading('');
+      finishRowOperation(unitExpense.id, operation);
     }
   }
 
   if (loading) return <div style={s.container}><Spinner /></div>;
+  const hasUnreconciledDetail = Boolean(
+    selectedExpense
+    && (unreconciledExpenses[selectedExpense.id]
+      || units.some((unit) => unreconciledRows[unit.id]))
+  );
 
   return (
     <div style={s.container}>
       <h2 style={s.heading}>Expensas</h2>
       <CreateExpensa onCreated={loadExpenses} />
       {msg && <p style={s.msg}>{msg}</p>}
-      {expenses.length === 0 ? (
+      {listError && (
+        <div style={s.errorMsg}>
+          <p role="alert" style={s.feedbackText}>{listError}</p>
+          <button type="button" onClick={() => loadExpenses()} style={s.retryBtn}>Reintentar actualización</button>
+        </div>
+      )}
+      {!listError && expenses.length === 0 ? (
         <p style={s.empty}>No hay expensas aún.</p>
-      ) : (
+      ) : !listError && (
         expenses.map((e) => (
           <div key={e.id} style={s.row} onClick={() => openDetail(e)}>
             <div>
@@ -320,14 +624,21 @@ function AdminView() {
       )}
 
       {modal && selectedExpense && (
-        <div style={s.overlay} onClick={() => setModal(false)}>
+        <div style={s.overlay} onClick={closeDetail}>
           <div style={s.modal} onClick={(e) => e.stopPropagation()}>
             <h3>{selectedExpense.description}</h3>
             <p style={s.modalInfo}>
               Fijo: ${(parseFloat(selectedExpense.fixed_amount) || 0).toLocaleString()} + Extra: ${(parseFloat(selectedExpense.extra_amount) || 0).toLocaleString()} = ${parseFloat(selectedExpense.amount).toLocaleString()} | Vence: {new Date(selectedExpense.due_date).toLocaleDateString('es-AR')}
             </p>
             {!editing && (
-              <button type="button" onClick={startEditing} style={s.editBtn}>Editar expensa</button>
+              <button
+                type="button"
+                disabled={Boolean(busyEdits[selectedExpense.id] || unreconciledExpenses[selectedExpense.id])}
+                onClick={startEditing}
+                style={{ ...s.editBtn, opacity: busyEdits[selectedExpense.id] || unreconciledExpenses[selectedExpense.id] ? 0.7 : 1 }}
+              >
+                {busyEdits[selectedExpense.id] ? 'Guardando...' : 'Editar expensa'}
+              </button>
             )}
             {editing && (
               <form id="edit-expense-form" onSubmit={submitEdit} style={s.editForm}>
@@ -356,10 +667,10 @@ function AdminView() {
                   </label>
                 </div>
                 <div style={s.actionGroup}>
-                  <button type="submit" disabled={editLoading} style={{ ...s.actionBtn, background: '#0d6efd' }}>
-                    {editLoading ? 'Guardando...' : 'Guardar cambios'}
+                  <button type="submit" disabled={Boolean(busyEdits[selectedExpense.id])} style={{ ...s.actionBtn, background: '#0d6efd' }}>
+                    {busyEdits[selectedExpense.id] ? 'Guardando...' : 'Guardar cambios'}
                   </button>
-                  <button type="button" disabled={editLoading} onClick={() => setEditing(false)} style={s.secondaryBtn}>Cancelar</button>
+                  <button type="button" disabled={Boolean(busyEdits[selectedExpense.id])} onClick={() => setEditing(false)} style={s.secondaryBtn}>Cancelar</button>
                 </div>
               </form>
             )}
@@ -369,6 +680,14 @@ function AdminView() {
               </p>
             )}
             {detailError && <p role="alert" style={s.errorMsg}>{detailError}</p>}
+            {(detailWarning || hasUnreconciledDetail) && (
+              <div style={s.warningMsg}>
+                <p role="status" style={s.feedbackText}>
+                  {detailWarning || 'La operación fue registrada y está pendiente de conciliación.'}
+                </p>
+                <button type="button" onClick={retryAdminReconciliation} style={s.retryBtn}>Reintentar actualización</button>
+              </div>
+            )}
             {unitsLoading ? <Spinner /> : (
               <div style={s.tableWrap}>
                 <table style={s.table}>
@@ -386,7 +705,9 @@ function AdminView() {
                       const st = manualPaymentStatus(u.status);
                       const hasProof = Boolean(u.payment_proof_url);
                       const actions = manualPaymentActions(u.status, 'admin', hasProof);
-                      const rowBusy = actionLoading.startsWith(`${u.id}:`);
+                      const activeOperation = busyRows[u.id];
+                      const rowBlocked = Boolean(unreconciledRows[u.id]);
+                      const rowBusy = Boolean(activeOperation) || rowBlocked;
                       return (
                         <tr key={u.id}>
                           <td>{u.unit_number}</td>
@@ -400,7 +721,7 @@ function AdminView() {
                                 style={{ ...s.secondaryBtn, opacity: rowBusy ? 0.7 : 1 }}
                                 onClick={() => handleDownload(u)}
                               >
-                                {actionLoading === `${u.id}:download` ? 'Descargando...' : 'Descargar comprobante'}
+                                {activeOperation?.action === 'download' ? 'Descargando...' : 'Descargar comprobante'}
                               </button>
                             )}
                             {!hasProof && u.status === 'in_review' && (
@@ -416,7 +737,7 @@ function AdminView() {
                                   style={{ ...s.actionBtn, background: '#198754', opacity: rowBusy ? 0.7 : 1 }}
                                   onClick={() => handleReview(u, 'approve')}
                                 >
-                                  {actionLoading === `${u.id}:approve` ? 'Aprobando...' : 'Aprobar'}
+                                  {activeOperation?.action === 'approve' ? 'Aprobando...' : 'Aprobar'}
                                 </button>
                               )}
                               {actions.includes('reject') && (
@@ -426,11 +747,12 @@ function AdminView() {
                                   style={{ ...s.actionBtn, background: '#dc3545', opacity: rowBusy ? 0.7 : 1 }}
                                   onClick={() => handleReview(u, 'reject')}
                                 >
-                                  {actionLoading === `${u.id}:reject` ? 'Rechazando...' : 'Rechazar'}
+                                  {activeOperation?.action === 'reject' ? 'Rechazando...' : 'Rechazar'}
                                 </button>
                               )}
                               {u.status === 'paid' && <span style={{ color: '#198754', fontSize: '0.8rem' }}>Aprobado</span>}
                             </div>
+                            {rowBlocked && <p role="status" style={s.inlineWarning}>Actualización pendiente de conciliación.</p>}
                             {actionErrors[u.id] && <p role="alert" style={s.inlineError}>{actionErrors[u.id]}</p>}
                           </td>
                         </tr>
@@ -440,7 +762,7 @@ function AdminView() {
                 </table>
               </div>
             )}
-            <button style={s.closeBtn} onClick={() => setModal(false)}>Cerrar</button>
+            <button style={s.closeBtn} onClick={closeDetail}>Cerrar</button>
           </div>
         </div>
       )}
@@ -459,6 +781,8 @@ const s = {
   empty: { color: '#6c757d', textAlign: 'center', padding: '2rem' },
   msg: { background: '#d1e7dd', color: '#0f5132', padding: '0.5rem', borderRadius: '4px', marginBottom: '0.75rem', fontSize: '0.875rem' },
   errorMsg: { background: '#f8d7da', color: '#842029', padding: '0.5rem', borderRadius: '4px', marginBottom: '0.75rem', fontSize: '0.875rem' },
+  warningMsg: { background: '#fff3cd', color: '#664d03', padding: '0.5rem', borderRadius: '4px', marginBottom: '0.75rem', fontSize: '0.875rem' },
+  feedbackText: { margin: '0 0 0.4rem' },
   row: {
     background: '#fff', padding: '1rem 1.25rem', borderRadius: '8px',
     boxShadow: '0 1px 4px rgba(0,0,0,0.08)', marginBottom: '0.5rem',
@@ -504,7 +828,12 @@ const s = {
   stateHelp: { margin: '0.4rem 0 0', fontSize: '0.78rem', color: '#6c757d' },
   recoveryHelp: { color: '#842029', fontSize: '0.75rem' },
   inlineError: { color: '#842029', fontSize: '0.75rem', margin: '0.35rem 0 0' },
+  inlineWarning: { color: '#664d03', fontSize: '0.75rem', margin: '0.35rem 0 0' },
   inlineSuccess: { color: '#0f5132', fontSize: '0.75rem', margin: '0.35rem 0 0' },
+  retryBtn: {
+    padding: '0.4rem 0.7rem', color: '#0d6efd', background: '#fff', border: '1px solid #0d6efd',
+    borderRadius: '4px', cursor: 'pointer', minHeight: '40px', fontSize: '0.78rem',
+  },
   editBtn: {
     padding: '0.45rem 0.8rem', color: '#0d6efd', background: '#fff', border: '1px solid #0d6efd',
     borderRadius: '4px', cursor: 'pointer', minHeight: '44px', marginBottom: '0.75rem',
