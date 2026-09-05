@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getErrorMessage } from '../services/errors';
 
@@ -11,6 +11,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const { login, loading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -27,6 +28,9 @@ export default function Login() {
     <div style={styles.wrapper}>
       <form onSubmit={handleSubmit} style={styles.card}>
         <h1 style={styles.title}>Comunidad App</h1>
+        {location.state?.passwordReset === true && (
+          <p role="status" style={styles.success}>Contraseña actualizada. Ya podés ingresar.</p>
+        )}
         {error && <p style={styles.error}>{error}</p>}
         <label style={styles.label}>Email</label>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={styles.input}           placeholder="admin1@comunidad.app" />
@@ -52,5 +56,6 @@ const styles = {
   input: { padding: '0.625rem', border: '1px solid #ced4da', borderRadius: '4px', fontSize: '1rem' },
   button: { marginTop: '1rem', padding: '0.75rem', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '1rem', fontWeight: 600, cursor: 'pointer' },
   error: { background: '#f8d7da', color: '#842029', padding: '0.5rem', borderRadius: '4px', fontSize: '0.875rem' },
+  success: { background: '#d1e7dd', color: '#0f5132', padding: '0.5rem', borderRadius: '4px', fontSize: '0.875rem' },
   link: { textAlign: 'center', fontSize: '0.875rem', color: '#6c757d', marginTop: '0.5rem' },
 };

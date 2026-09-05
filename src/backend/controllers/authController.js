@@ -205,13 +205,11 @@ exports.forgotPassword = async (req, res) => {
       return res.json({ message: GENERIC_RESET_MESSAGE });
     }
 
-    const resetUrl = new URL(
-      `/api/auth/reset-password/${encodeURIComponent(resetToken)}`,
-      `${getPublicAppOrigin()}/`
-    ).toString();
+    const resetUrl = new URL('/reset-password', `${getPublicAppOrigin()}/`);
+    resetUrl.hash = `token=${encodeURIComponent(resetToken)}`;
 
     res.json({ message: GENERIC_RESET_MESSAGE });
-    scheduleResetEmail({ email, resetUrl });
+    scheduleResetEmail({ email, resetUrl: resetUrl.toString() });
   } catch (err) {
     console.error('Error en forgotPassword:', err);
     res.status(500).json({ error: 'Error interno del servidor' });

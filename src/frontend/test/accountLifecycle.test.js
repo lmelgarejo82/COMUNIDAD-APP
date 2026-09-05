@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAccountRecoveryService } from '../src/services/accountRecovery.js';
+import { consumeFragmentToken } from '../src/utils/fragmentToken.js';
+import { validateResetPassword, resetPasswordErrorMessage } from '../src/utils/passwordReset.js';
 import {
   addResendingInvite,
   createInviteRequestTracker,
@@ -32,6 +34,65 @@ test('account recovery service sends the encoded token only in the reset path', 
     '/auth/reset-password/token%2Fwith%20spaces',
     { password: 'Secure123!' },
   ]]);
+});
+
+test('fragment token is returned and immediately removed without storage access', () => {
+  const replacements = [];
+  const windowLike = {
+    location: { hash: '#token=' + 'c'.repeat(64), pathname: '/reset-password', search: '?source=email' },
+    history: { replaceState: (...args) => replacements.push(args) },
+    get localStorage() { assert.fail('must not access localStorage'); },
+    get sessionStorage() { assert.fail('must not access sessionStorage'); },
+  };
+
+  assert.equal(consumeFragmentToken(windowLike), 'c'.repeat(64));
+  assert.deepEqual(replacements, [[null, '', '/reset-password?source=email']]);
+});
+
+test('missing fragment token returns null and leaves the URL untouched', () => {
+  for (const hash of ['', '#source=email', '#token=']) {
+    const windowLike = {
+      location: { hash, pathname: '/reset-password', search: '' },
+      history: { replaceState: () => assert.fail('must leave URL untouched') },
+    };
+    assert.equal(consumeFragmentToken(windowLike), null);
+  }
+});
+
+test('fragment token is decoded once and safely encoded for the API path', async () => {
+  const calls = [];
+  const windowLike = {
+    location: { hash: '#token=token%2Fwith%20spaces%2B%252F', pathname: '/reset-password', search: '' },
+    history: { replaceState: () => { windowLike.location.hash = ''; } },
+  };
+  const service = createAccountRecoveryService({
+    post: async (...args) => { calls.push(args); return { data: {} }; },
+  });
+
+  const token = consumeFragmentToken(windowLike);
+  assert.equal(token, 'token/with spaces+%2F');
+  assert.equal(consumeFragmentToken(windowLike), null);
+  await service.reset(token, 'Secure123!');
+  assert.deepEqual(calls, [[
+    '/auth/reset-password/token%2Fwith%20spaces%2B%252F',
+    { password: 'Secure123!' },
+  ]]);
+});
+
+test('reset validation blocks missing token, empty fields, short and mismatched passwords', () => {
+  assert.equal(validateResetPassword(null, 'Secure123!', 'Secure123!'), 'El enlace es inválido, venció o ya fue utilizado.');
+  assert.equal(validateResetPassword('token', '', ''), 'Completá ambos campos de contraseña.');
+  assert.equal(validateResetPassword('token', 'Secure123!', ''), 'Completá ambos campos de contraseña.');
+  assert.equal(validateResetPassword('token', '12345', '12345'), 'La contraseña debe tener al menos 6 caracteres.');
+  assert.equal(validateResetPassword('token', '123456', '654321'), 'Las contraseñas no coinciden.');
+  assert.equal(validateResetPassword('token', '123456', '123456'), null);
+});
+
+test('reset errors use fixed messages without exposing backend error text', () => {
+  assert.equal(resetPasswordErrorMessage({ response: { status: 400, data: { error: 'secret token' } } }), 'El enlace es inválido, venció o ya fue utilizado.');
+  for (const error of [new Error('secret token'), { response: { status: 500, data: { error: 'secret token' } } }]) {
+    assert.equal(resetPasswordErrorMessage(error), 'No pudimos actualizar la contraseña. Intentá nuevamente.');
+  }
 });
 
 test('invite presentation separates pending from immutable history', () => {
