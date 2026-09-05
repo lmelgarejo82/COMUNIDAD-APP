@@ -1,3 +1,5 @@
+import { createLatestRequestTracker } from './latestRequest.js';
+
 export function partitionInvites(invites) {
   return invites.reduce((groups, invite) => {
     groups[invite.status === 'pending' ? 'pending' : 'history'].push(invite);
@@ -16,20 +18,7 @@ export function inviteListViewState(loading, error, invites = []) {
 }
 
 export function createInviteRequestTracker() {
-  let latestRequest = 0;
-
-  return {
-    begin() {
-      latestRequest += 1;
-      return latestRequest;
-    },
-    isCurrent(requestId) {
-      return requestId === latestRequest;
-    },
-    invalidate() {
-      latestRequest += 1;
-    },
-  };
+  return createLatestRequestTracker();
 }
 
 export function addResendingInvite(resendingIds, inviteId) {

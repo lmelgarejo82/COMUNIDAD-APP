@@ -11,6 +11,17 @@ import {
   removeResendingInvite,
 } from '../src/utils/invitePresentation.js';
 import * as invitePresentation from '../src/utils/invitePresentation.js';
+import * as latestRequest from '../src/utils/latestRequest.js';
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 test('account recovery service sends only the email on forgot request', async () => {
   const calls = [];
@@ -231,6 +242,43 @@ test('invite request tracking publishes only the latest load generation', () => 
 
   tracker.invalidate();
   assert.equal(tracker.isCurrent(refreshedLoad), false);
+});
+
+test('superseded registration requests cannot publish any completion state', async () => {
+  assert.equal(
+    typeof latestRequest.runLatestRequest,
+    'function',
+    'registration must route async completion through the request-generation guard'
+  );
+
+  const tracker = createInviteRequestTracker();
+  const requestA = deferred();
+  const requestB = deferred();
+  const requestC = deferred();
+  const events = [];
+  const handlers = (label) => ({
+    onSuccess: () => events.push(`${label}:success`),
+    onError: () => events.push(`${label}:error`),
+    onFinally: () => events.push(`${label}:finally`),
+  });
+
+  const runA = latestRequest.runLatestRequest(tracker, () => requestA.promise, handlers('A'));
+  tracker.invalidate();
+  const runB = latestRequest.runLatestRequest(tracker, () => requestB.promise, handlers('B'));
+
+  requestA.resolve({ status: 201 });
+  await runA;
+  assert.deepEqual(events, []);
+
+  tracker.invalidate();
+  const runC = latestRequest.runLatestRequest(tracker, () => requestC.promise, handlers('C'));
+  requestB.reject(new Error('stale failure'));
+  await runB;
+  assert.deepEqual(events, []);
+
+  requestC.resolve({ status: 201 });
+  await runC;
+  assert.deepEqual(events, ['C:success', 'C:finally']);
 });
 
 test('resend in-flight ids ignore duplicates and settle only their own row', () => {

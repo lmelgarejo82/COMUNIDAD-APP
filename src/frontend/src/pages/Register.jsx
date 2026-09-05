@@ -1,12 +1,15 @@
-import { useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { getErrorMessage } from '../services/errors';
 import { consumeFragmentToken, subscribeFragmentToken } from '../utils/fragmentToken';
+import { createLatestRequestTracker, runLatestRequest } from '../utils/latestRequest';
 
 const PUBLIC_REGISTRATION_ENABLED = import.meta.env.VITE_PUBLIC_REGISTRATION_ENABLED === 'true';
 
 export default function Register() {
+  const requestTrackerRef = useRef(null);
+  if (!requestTrackerRef.current) requestTrackerRef.current = createLatestRequestTracker();
   const [inviteToken, setInviteToken] = useState(() => consumeFragmentToken(window));
   const [form, setForm] = useState({
     email: '', password: '', access_code: '',
@@ -14,11 +17,20 @@ export default function Register() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useLayoutEffect(() => subscribeFragmentToken(window, (token) => {
-    setInviteToken(token);
-    setForm({ email: '', password: '', access_code: '' });
-    setError('');
-  }), []);
+  useLayoutEffect(() => {
+    const unsubscribe = subscribeFragmentToken(window, (token) => {
+      requestTrackerRef.current.invalidate();
+      setInviteToken(token);
+      setForm({ email: '', password: '', access_code: '' });
+      setError('');
+      setLoading(false);
+    });
+
+    return () => {
+      requestTrackerRef.current.invalidate();
+      unsubscribe();
+    };
+  }, []);
 
   function handleChange(e) {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -28,19 +40,18 @@ export default function Register() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    try {
-      const body = inviteToken
-        ? { email: form.email, password: form.password, inviteToken }
-        : { email: form.email, password: form.password, access_code: form.access_code };
-      const { data } = await api.post('/auth/register', body);
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      window.location.href = '/dashboard';
-    } catch (err) {
-      setError(getErrorMessage(err, 'Error al registrarse'));
-    } finally {
-      setLoading(false);
-    }
+    const body = inviteToken
+      ? { email: form.email, password: form.password, inviteToken }
+      : { email: form.email, password: form.password, access_code: form.access_code };
+    await runLatestRequest(requestTrackerRef.current, () => api.post('/auth/register', body), {
+      onSuccess: ({ data }) => {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        window.location.href = '/dashboard';
+      },
+      onError: (err) => setError(getErrorMessage(err, 'Error al registrarse')),
+      onFinally: () => setLoading(false),
+    });
   }
 
   if (!inviteToken && !PUBLIC_REGISTRATION_ENABLED) {
