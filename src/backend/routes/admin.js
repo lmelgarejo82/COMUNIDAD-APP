@@ -7,6 +7,7 @@ const { authorize } = require('../middleware/authorize');
 const { setCommunity } = require('../middleware/setCommunity');
 
 router.post('/invite', authenticate, authorize('admin'), setCommunity, adminController.invite);
+router.get('/invites', authenticate, authorize('admin'), setCommunity, adminController.listInvites);
 router.get('/communities', authenticate, authorize('admin'), adminController.listCommunities);
 router.get('/audit', authenticate, authorize('admin'), setCommunity, auditController.list);
 

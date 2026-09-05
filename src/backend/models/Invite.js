@@ -37,6 +37,23 @@ const Invite = {
     return rows[0] ? { ...rows[0], token } : undefined;
   },
 
+  async listByCommunity(communityId) {
+    const { rows } = await pool.query(
+      `SELECT i.id, i.email, i.unit_id, i.unit_number, i.ownership_type,
+              i.expires_at, i.used, i.created_at,
+              CASE
+                WHEN i.used IS TRUE THEN 'used'
+                WHEN i.expires_at <= NOW() THEN 'expired'
+                ELSE 'pending'
+              END AS status
+         FROM invites i
+        WHERE i.community_id = $1
+        ORDER BY i.created_at DESC, i.id DESC`,
+      [communityId]
+    );
+    return rows;
+  },
+
   async findForAcceptance(tokenInput, client) {
     const token = normalizeToken(tokenInput);
     if (!token) return null;

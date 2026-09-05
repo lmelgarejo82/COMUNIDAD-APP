@@ -75,6 +75,15 @@ exports.invite = async (req, res) => {
   }
 };
 
+exports.listInvites = async (req, res) => {
+  try {
+    res.json(await Invite.listByCommunity(req.communityId));
+  } catch (err) {
+    console.error('Error en listInvites:', err.message);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 exports.listCommunities = async (req, res) => {
   try {
     // New: multi-complex admin gets all complexes via admin_complexes
