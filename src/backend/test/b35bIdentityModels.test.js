@@ -79,6 +79,47 @@ test('invite acceptance locks an unused invite and revalidates its active unit c
   assert.equal(call.params[0] === expectedHash, true);
 });
 
+test('rotating an invitation invalidates the old credential while preserving acceptance lookup', async () => {
+  const oldToken = '1'.repeat(64);
+  const digest = token => crypto.createHash('sha256').update(token).digest('hex');
+  let persistedHash = digest(oldToken);
+  const row = { id: 41, community_id: 7, unit_id: 11, unit_number: 'A-101',
+    ownership_type: 'owner', email: 'resident@example.test', used: false,
+    expires_at: new Date(Date.now() + 3600000), created_at: new Date() };
+  let draftHash;
+  const events = [];
+  const client = {
+    async query(sql, params) {
+      sql = String(sql).trim();
+      if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) {
+        events.push(sql);
+        if (sql === 'COMMIT') persistedHash = draftHash;
+        return { rows: [] };
+      }
+      if (/^UPDATE invites/.test(sql)) {
+        assert.deepEqual(params.slice(2), [41, 7]);
+        draftHash = params[0];
+        return { rows: [{ ...row, expires_at: params[1] }] };
+      }
+      assert.match(sql, /FOR UPDATE OF i, un/);
+      if (/WHERE i\.token_hash = \$1/.test(sql)) {
+        return { rows: params[0] === persistedHash ? [row] : [] };
+      }
+      assert.deepEqual(params, [41, 7]);
+      return { rows: [row] };
+    },
+    release() { events.push('RELEASE'); },
+  };
+  delete require.cache[invitePath];
+  mockModule(dbPath, { pool: { connect: async () => client } });
+  const { Invite } = require(invitePath);
+  const rotated = await Invite.rotatePending(41, 7);
+  assert.equal(persistedHash !== digest(oldToken), true);
+  assert.equal(await Invite.findForAcceptance(oldToken, client), null);
+  assert.equal((await Invite.findForAcceptance(rotated.token, client)).id, 41);
+  assert.deepEqual(events, ['BEGIN', 'COMMIT', 'RELEASE']);
+});
+
 test('invite creation repeats unit tenant scope in the authoritative insert', async () => {
   delete require.cache[invitePath];
   let call;

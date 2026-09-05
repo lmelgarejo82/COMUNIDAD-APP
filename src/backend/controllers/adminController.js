@@ -6,6 +6,12 @@ const { getPublicAppOrigin } = require('../config/security');
 
 const VALID_OWNERSHIP_TYPES = new Set(['owner', 'tenant']);
 
+function buildInviteUrl(token) {
+  const url = new URL('/register', getPublicAppOrigin());
+  url.hash = `token=${encodeURIComponent(token)}`;
+  return url;
+}
+
 exports.invite = async (req, res) => {
   try {
     const { email, unit_id, ownership_type } = req.body;
@@ -43,8 +49,7 @@ exports.invite = async (req, res) => {
     });
     if (!invite) return res.status(404).json({ error: 'Unidad no encontrada' });
 
-    const inviteUrl = new URL('/register', getPublicAppOrigin());
-    inviteUrl.hash = `token=${encodeURIComponent(invite.token)}`;
+    const inviteUrl = buildInviteUrl(invite.token);
 
     let emailSent = false;
     let deliveryWarning = null;
@@ -81,6 +86,48 @@ exports.listInvites = async (req, res) => {
   } catch (err) {
     console.error('Error en listInvites:', err.message);
     res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.resendInvite = async (req, res) => {
+  try {
+    const invite = await Invite.rotatePending(req.params.id, req.communityId);
+    if (!invite) {
+      return res.status(404).json({ error: 'Invitación pendiente no encontrada' });
+    }
+
+    let emailSent = false;
+    let deliveryWarning = null;
+    try {
+      await sendResidentInviteEmail({
+        email: invite.email,
+        inviteUrl: buildInviteUrl(invite.token).toString(),
+        unitNumber: invite.unit_number,
+        ownershipType: invite.ownership_type,
+      });
+      emailSent = true;
+    } catch {
+      deliveryWarning = 'La invitación fue renovada, pero no se pudo enviar el email.';
+      console.error('Invitación renovada; falló el envío de email.');
+    }
+
+    return res.json({
+      id: invite.id,
+      email: invite.email,
+      unit_id: invite.unit_id,
+      unit_number: invite.unit_number,
+      ownership_type: invite.ownership_type,
+      expires_at: invite.expires_at,
+      used: invite.used,
+      created_at: invite.created_at,
+      status: invite.status,
+      message: emailSent ? 'Invitación reenviada' : 'Invitación renovada',
+      email_sent: emailSent,
+      delivery_warning: deliveryWarning,
+    });
+  } catch {
+    console.error('Error en resendInvite.');
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
 

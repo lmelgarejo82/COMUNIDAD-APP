@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 
 const authControllerPath = require.resolve('../controllers/authController');
 const userControllerPath = require.resolve('../controllers/userController');
@@ -290,6 +291,94 @@ test('a used or concurrently consumed invite cannot create a second user', async
   assert.equal(res.statusCode, 400);
   assert.equal(userCreated, false);
   assert.deepEqual(events, ['BEGIN', 'ROLLBACK', 'RELEASE']);
+});
+
+test('rotated invitation rejects the old token and accepts the new token exactly once', async () => {
+  const digest = token => crypto.createHash('sha256').update(token).digest('hex');
+  const oldToken = '1'.repeat(64);
+  let persistedHash = digest(oldToken);
+  let used = false;
+  let draftHash;
+  let draftUsed;
+  let usersCreated = 0;
+  let ownershipsCreated = 0;
+  const events = [];
+  const row = { id: 41, email: 'resident@example.test', community_id: 7,
+    unit_id: 11, unit_number: 'A-101', resolved_unit_number: 'A-101',
+    ownership_type: 'tenant', expires_at: new Date(Date.now() + 3600000),
+    used: false, created_at: new Date() };
+  const client = {
+    async query(sql, params) {
+      sql = String(sql).trim();
+      if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) {
+        events.push(sql);
+        if (sql === 'BEGIN') { draftHash = persistedHash; draftUsed = used; }
+        if (sql === 'COMMIT') { persistedHash = draftHash; used = draftUsed; }
+        return { rows: [] };
+      }
+      if (/^SELECT/.test(sql)) {
+        assert.match(sql, /FOR UPDATE OF i, un/);
+        events.push('LOCK');
+        if (/WHERE i\.token_hash = \$1/.test(sql)) {
+          return { rows: !used && params[0] === persistedHash ? [{ ...row, used }] : [] };
+        }
+        assert.deepEqual(params, [41, 7]);
+        return { rows: used ? [] : [row] };
+      }
+      if (/UPDATE invites\s+SET token_hash/.test(sql)) {
+        draftHash = params[0];
+        return { rows: [{ ...row, expires_at: params[1] }] };
+      }
+      if (/UPDATE invites SET used = TRUE/.test(sql)) {
+        assert.deepEqual(params, [41]);
+        draftUsed = true;
+        events.push('CONSUME');
+        return { rows: used ? [] : [{ id: 41 }] };
+      }
+      if (/INSERT INTO unit_ownerships/.test(sql)) {
+        assert.deepEqual(params, [11, 90, 'tenant']);
+        ownershipsCreated++;
+        events.push('OWNERSHIP');
+        return { rows: [] };
+      }
+      throw new Error('unexpected SQL');
+    },
+    release() { events.push('RELEASE'); },
+  };
+  clear([invitePath, dbPath]);
+  mockModule(dbPath, { pool: { connect: async () => client } });
+  const { Invite } = require(invitePath);
+  const rotated = await Invite.rotatePending(41, 7);
+  events.length = 0;
+  const { register } = loadAuth({
+    user: {
+      findByEmail: async () => null,
+      create: async payload => {
+        assert.equal(payload.role, 'residente');
+        assert.equal(payload.community_id, 7);
+        assert.equal(payload.unit_id, 11);
+        assert.equal(payload.user_type, 'tenant');
+        usersCreated++;
+        events.push('USER');
+        return { id: 90, ...payload };
+      },
+      findById: async () => ({ id: 90, email: row.email, role: 'residente', community_id: 7 }),
+    }, community: {}, invite: Invite, client,
+  });
+  for (const [inviteToken, want] of [[oldToken, 400], [rotated.token, 201], [rotated.token, 400]]) {
+    const res = response();
+    await register({ body: { email: row.email, password: 'Secure123!', inviteToken,
+      role: 'admin', community_id: 8, unit_id: 99, user_type: 'owner' } }, res);
+    assert.equal(res.statusCode, want);
+  }
+  assert.equal(usersCreated, 1);
+  assert.equal(ownershipsCreated, 1);
+  assert.equal(used, true);
+  assert.deepEqual(events, [
+    'BEGIN', 'LOCK', 'ROLLBACK', 'RELEASE',
+    'BEGIN', 'LOCK', 'USER', 'OWNERSHIP', 'CONSUME', 'COMMIT', 'RELEASE',
+    'BEGIN', 'LOCK', 'ROLLBACK', 'RELEASE',
+  ]);
 });
 
 function loadUserController(user) {

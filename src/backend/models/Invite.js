@@ -11,6 +11,14 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+async function rollback(client) {
+  try {
+    await client.query('ROLLBACK');
+  } catch {
+    console.error('Error en rollback de invitación.');
+  }
+}
+
 const Invite = {
   async create({ email, community_id, unit_id, ownership_type, created_by }) {
     const token = crypto.randomBytes(32).toString('hex');
@@ -52,6 +60,61 @@ const Invite = {
       [communityId]
     );
     return rows;
+  },
+
+  async rotatePending(id, communityId) {
+    const client = await pool.connect();
+    let transactionOpen = false;
+    try {
+      await client.query('BEGIN');
+      transactionOpen = true;
+      const { rows } = await client.query(
+        `SELECT i.id, i.email, i.community_id, i.unit_id, i.unit_number,
+                i.ownership_type, i.expires_at, i.used, i.created_at
+           FROM invites i
+           JOIN units un ON un.id = i.unit_id
+           JOIN floors f ON f.id = un.floor_id
+           JOIN buildings b ON b.id = f.building_id
+           JOIN complexes cx ON cx.id = b.complex_id
+          WHERE i.id = $1
+            AND i.community_id = $2
+            AND i.used IS NOT TRUE
+            AND i.expires_at > NOW()
+            AND cx.community_id = $2
+            AND COALESCE(un.is_active, TRUE) = TRUE
+            AND un.deleted_at IS NULL
+            AND f.deleted_at IS NULL
+            AND b.deleted_at IS NULL
+            AND cx.deleted_at IS NULL
+          FOR UPDATE OF i, un`,
+        [id, communityId]
+      );
+      if (!rows[0]) {
+        await rollback(client);
+        transactionOpen = false;
+        return null;
+      }
+
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 7 * 24 * 3600000);
+      const update = await client.query(
+        `UPDATE invites
+            SET token_hash = $1, expires_at = $2
+          WHERE id = $3 AND community_id = $4 AND used IS NOT TRUE
+          RETURNING id, email, community_id, unit_id, unit_number,
+                    ownership_type, expires_at, used, created_at`,
+        [hashToken(token), expiresAt, id, communityId]
+      );
+      if (!update.rows[0]) throw new Error('INVITE_ROTATION_LOST');
+      await client.query('COMMIT');
+      transactionOpen = false;
+      return { ...update.rows[0], status: 'pending', token };
+    } catch (err) {
+      if (transactionOpen) await rollback(client);
+      throw err;
+    } finally {
+      client.release();
+    }
   },
 
   async findForAcceptance(tokenInput, client) {
