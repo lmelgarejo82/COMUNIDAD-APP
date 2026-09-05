@@ -1,10 +1,10 @@
 # Controlled pilot readiness — 2026-09-05
 
-This records verified behavior, not a production certification. B36.1A account lifecycle is complete at `2ccf760`; the payment, visible-feature and full-pilot acceptance gates are separate subsequent blocks.
+This records verified behavior, not a production certification. B36.1A account lifecycle verification covers `423b682`; the payment, visible-feature and full-pilot acceptance gates are separate subsequent blocks.
 
 ## Account lifecycle gate
 
-- Backend: **290 passed, 0 failed, 0 skipped**, including real Redis integration against a disposable isolated Redis instance. Frontend: **18 passed, 0 failed**; production build successful.
+- Backend: **290 passed, 0 failed, 0 skipped**, including real Redis integration against a disposable isolated Redis instance. Frontend: **19 passed, 0 failed**; production build successful.
 - Production Docker rebuild succeeded. Public `/api/health` and SPA recovery route returned **200**; the served frontend asset matched the fresh build.
 - Fresh, non-seeded users in two isolated QA communities exercised owner and tenant invitation onboarding, login/logout, invite listing, resend, forgot/reset and role/scope rejection.
 - Admin list returns no token/hash. Resends preserve one row, invalidate the old credential and commit before SMTP. Concurrent resends returned `200/200` and delivered two messages, but acceptance was `400/201`: exactly one persisted credential remained valid. Duplicate delivery is an accepted pilot observation.
@@ -19,6 +19,8 @@ This records verified behavior, not a production certification. B36.1A account l
 The supported reset API is **`POST /api/auth/reset-password` with JSON `{token,password}`**. The obsolete path-token route has no consumer and is removed. This supersedes the historical compatibility route in the original B36.1A design/plan. Nginx rejects case-insensitive and normalized legacy descendants without credential-bearing access/error logs; body reset strips query parameters and does not log its request URL. Behavioral Docker regressions exercise lowercase, uppercase, mixed and encoded variants and synthetic-credential absence from logs.
 
 Registration and reset consume fragment credentials in memory, immediately remove the URL fragment and handle a new fragment while the same page remains mounted. No invitation/reset token is stored in localStorage, sessionStorage or IndexedDB. Admin-defined community/unit/owner-or-tenant claims remain server authoritative.
+
+Registration invalidates superseded requests on credential replacement/unmount. Deferred unit and browser checks prove an old success/error cannot change session, navigation, messages or the newer request's loading state. This suppresses obsolete client effects, not already-started server transactions. The browser's temporary response mock was removed; running Nginx configuration was compared with the repository and matched exactly.
 
 Git checkout now preserves LF for shell scripts and SQL migrations. A fresh Windows `core.autocrlf=true` checkout is tested. No migration/checksum algorithm or stored history was rewritten: all26 applied checksums inspected during diagnosis matched committed LF bytes and none matched the accidental CRLF checkout. The rebuilt backend subsequently accepted all31 current migrations.
 
