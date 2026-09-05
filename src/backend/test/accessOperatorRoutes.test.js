@@ -102,6 +102,16 @@ async function requestRoute({ routeFile, controllerFile, controllerExports, role
   }
 }
 
+for (const [role, method, path, expected] of [
+  ['admin', 'PUT', '/61/status', 200], ['residente', 'PUT', '/61/status', 403], ['access_operator', 'PUT', '/61/status', 403],
+  ['residente', 'POST', '/', 200], ['admin', 'POST', '/', 403], ['access_operator', 'POST', '/', 403],
+]) {
+  test(`booking ${method} ${path} is scoped to the established ${role} permission`, async () => {
+    const result = await requestRoute({ routeFile: '../routes/bookings', controllerFile: '../controllers/bookingController', role, method, path });
+    assert.equal(result.status, expected);
+  });
+}
+
 test('access_operator cannot create MercadoPago preference', async () => {
   const result = await requestRoute({
     routeFile: '../routes/payments',

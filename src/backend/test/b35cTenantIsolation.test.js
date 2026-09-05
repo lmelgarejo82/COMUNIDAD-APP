@@ -99,10 +99,11 @@ test('owner cannot vote in a valid poll from another community', async () => {
 
 function loadBookingController(bookingImpl) {
   clear([bookingControllerPath, bookingPath, notificationPath, userPath, dbPath]);
-  mockModule(bookingPath, { Booking: bookingImpl });
+  mockModule(bookingPath, { Booking: { getAmenityById: async () => ({ id: 12 }), ...bookingImpl } });
   mockModule(notificationPath, { Notification: { create: async () => ({}) } });
   mockModule(userPath, { User: { findById: async () => ({ id: 5, unit_number: 'A-101', community_id: 7 }) } });
-  mockModule(dbPath, { pool: { query: async () => ({ rows: [] }) } });
+  const client = { query: async () => ({ rows: [] }), release() {} };
+  mockModule(dbPath, { pool: { ...client, connect: async () => client } });
   return require('../controllers/bookingController');
 }
 
@@ -171,7 +172,7 @@ test('admin updates a booking in req.communityId', async () => {
   const { updateBookingStatus } = loadBookingController({
     async findById(id, communityId) {
       calls.push(['find', id, communityId]);
-      return communityId === 7 ? { id: 61, user_id: 5, amenity_name: 'SUM' } : null;
+      return communityId === 7 ? { id: 61, amenity_id: 12, status: 'pending', user_id: 5, amenity_name: 'SUM' } : null;
     },
     async updateStatus(id, status, communityId) {
       calls.push(['update', id, status, communityId]);
@@ -180,7 +181,7 @@ test('admin updates a booking in req.communityId', async () => {
   });
   const res = createResponse();
 
-  await updateBookingStatus({ params: { id: '61' }, body: { status: 'cancelled' }, communityId: 7 }, res);
+  await updateBookingStatus({ params: { id: '61' }, body: { status: 'cancelled', expected_status: 'pending' }, communityId: 7 }, res);
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(calls, [['find', '61', 7], ['update', '61', 'cancelled', 7]]);
@@ -200,7 +201,7 @@ test('admin cannot update or cancel a booking from another community', async () 
   });
   const res = createResponse();
 
-  await updateBookingStatus({ params: { id: '62' }, body: { status: 'cancelled' }, communityId: 7 }, res);
+  await updateBookingStatus({ params: { id: '62' }, body: { status: 'cancelled', expected_status: 'pending' }, communityId: 7 }, res);
 
   assert.equal(res.statusCode, 404);
   assert.deepEqual(res.body, { error: 'Reserva no encontrada' });

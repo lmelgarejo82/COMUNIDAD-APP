@@ -50,7 +50,7 @@ test('booking amenity, booking reads, user list and status mutation bind communi
   await Booking.getAmenityById(12, 7);
   await Booking.findById(61, 7);
   await Booking.findByUser(5, 7);
-  await Booking.updateStatus(61, 'cancelled', 7);
+  await Booking.updateStatus(61, 'cancelled', 7, 'pending');
   await Booking.create({
     amenity_id: 12,
     community_id: 7,
@@ -66,6 +66,8 @@ test('booking amenity, booking reads, user list and status mutation bind communi
     assert.ok(call.params.includes(7));
   }
   assert.match(calls[3].sql, /UPDATE bookings/);
+  assert.deepEqual(calls[3].params, [61, 'cancelled', 7, 'pending']);
+  assert.match(calls[3].sql, /b\.status = \$4/);
 });
 
 test('announcement ID reads and mutations bind announcement ID plus community', async () => {

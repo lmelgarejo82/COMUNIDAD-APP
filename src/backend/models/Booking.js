@@ -2,7 +2,7 @@ const { pool } = require('../db');
 const { Hierarchy } = require('./Hierarchy');
 
 const Booking = {
-  async findOverlapping(amenityId, dateFrom, dateTo, excludeId = null) {
+  async findOverlapping(amenityId, dateFrom, dateTo, excludeId = null, client = pool) {
     let query = `SELECT COUNT(*) AS count FROM bookings
                  WHERE amenity_id = $1 AND status IN ('pending', 'active')
                  AND date_from < $3 AND date_to > $2`;
@@ -11,14 +11,14 @@ const Booking = {
       query += ' AND id != $4';
       params.push(excludeId);
     }
-    const { rows } = await pool.query(query, params);
+    const { rows } = await client.query(query, params);
     return parseInt(rows[0].count) > 0;
   },
 
-  async create({ amenity_id, community_id, user_id, unit_number, date_from, date_to, deposit_amount, notes }) {
-    const unitId = await Hierarchy.resolveUnitId(community_id, unit_number);
+  async create({ amenity_id, community_id, user_id, unit_number, date_from, date_to, deposit_amount, notes }, client = pool) {
+    const unitId = await Hierarchy.resolveUnitId(community_id, unit_number, client);
 
-    const { rows } = await pool.query(
+    const { rows } = await client.query(
       `INSERT INTO bookings (amenity_id, user_id, unit_number, unit_id, date_from, date_to, deposit_amount, notes)
        SELECT a.id, $2, $3, $4, $5, $6, $7, $8
        FROM amenities a
@@ -67,8 +67,8 @@ const Booking = {
     return rows;
   },
 
-  async findById(id, communityId) {
-    const { rows } = await pool.query(
+  async findById(id, communityId, client = pool) {
+    const { rows } = await client.query(
       `SELECT b.*, a.name AS amenity_name, a.rules, u.email AS user_email
        FROM bookings b
        JOIN amenities a ON b.amenity_id = a.id
@@ -78,12 +78,15 @@ const Booking = {
     return rows[0] || null;
   },
 
-  async updateStatus(id, status, communityId) {
-    const { rows } = await pool.query(
+  async updateStatus(id, status, communityId, expectedStatus, client = pool) {
+    const { rows } = await client.query(
       `UPDATE bookings b SET status = $2, updated_at = NOW()
        FROM amenities a
        WHERE b.id = $1 AND b.amenity_id = a.id AND a.community_id = $3
-       RETURNING b.*`, [id, status, communityId]
+         AND b.status = $4
+         AND ((b.status = 'pending' AND $2 IN ('active', 'cancelled'))
+           OR (b.status = 'active' AND $2 IN ('finished', 'cancelled')))
+       RETURNING b.*`, [id, status, communityId, expectedStatus]
     );
     return rows[0] || null;
   },
@@ -95,9 +98,9 @@ const Booking = {
     return rows;
   },
 
-  async getAmenityById(id, communityId) {
-    const { rows } = await pool.query(
-      'SELECT * FROM amenities WHERE id = $1 AND community_id = $2',
+  async getAmenityById(id, communityId, client = null) {
+    const { rows } = await (client || pool).query(
+      `SELECT * FROM amenities WHERE id = $1 AND community_id = $2${client ? ' FOR UPDATE' : ''}`,
       [id, communityId]
     );
     return rows[0] || null;

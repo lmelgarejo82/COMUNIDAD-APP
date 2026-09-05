@@ -13,7 +13,7 @@ export const bookingService = {
   create(data) {
     return api.post('/bookings', data);
   },
-  updateStatus(id, status) {
-    return api.put(`/bookings/${id}/status`, { status });
+  updateStatus(id, status, expectedStatus) {
+    return api.put(`/bookings/${id}/status`, { status, expected_status: expectedStatus });
   },
 };

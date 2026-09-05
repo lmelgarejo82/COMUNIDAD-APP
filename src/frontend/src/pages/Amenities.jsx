@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Calendar, momentLocalizer } from 'react-big-calendar';
 import moment from 'moment';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
@@ -6,6 +6,7 @@ import { bookingService } from '../services/bookings';
 import { useAuth } from '../context/AuthContext';
 import { getErrorMessage } from '../services/errors';
 import Spinner from '../components/Spinner';
+import { getBookingActions, bookingStatusLabels } from '../utils/bookingTransitions';
 
 moment.locale('es', {
   months: 'enero_febrero_marzo_abril_mayo_junio_julio_agosto_septiembre_octubre_noviembre_diciembre'.split('_'),
@@ -32,16 +33,27 @@ export default function Amenities() {
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [form, setForm] = useState({ amenity_id: '', notes: '' });
   const [msg, setMsg] = useState('');
+  const [selection, setSelection] = useState(null);
+  const selectionRef = useRef(null);
+  const alive = useRef(false);
+  const reads = useRef(0);
+  const requests = useRef(new Map());
+  const [operations, setOperations] = useState({});
+  const [actionError, setActionError] = useState('');
+  const [refreshErrors, setRefreshErrors] = useState({});
+  const selectedEvent = events.find(e => e.id === selection?.id);
+  const selectedBooking = selectedEvent?.resource;
 
   const isAdmin = user?.role === 'admin';
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    const request = ++reads.current;
     try {
       const [amenitiesRes, bookingsRes] = await Promise.all([
         bookingService.getAmenities(),
         isAdmin ? bookingService.listBookings() : bookingService.listMy(),
       ]);
+      if (!alive.current || reads.current !== request) return false;
       setAmenities(amenitiesRes.data);
       const rows = isAdmin ? bookingsRes.data.data || [] : bookingsRes.data;
       const evts = rows.map((b) => ({
@@ -52,14 +64,20 @@ export default function Amenities() {
         resource: b,
       }));
       setEvents(evts);
+      return true;
     } catch {
-      setMsg('Error al cargar datos');
+      if (alive.current && reads.current === request) setMsg('Error al cargar datos');
+      return false;
     } finally {
-      setLoading(false);
+      if (alive.current && reads.current === request) setLoading(false);
     }
   }, [isAdmin]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    alive.current = true;
+    loadData();
+    return () => { alive.current = false; reads.current += 1; selectionRef.current = null; requests.current.clear(); };
+  }, [loadData]);
 
   function handleSelectSlot({ start, end }) {
     setSelectedSlot({ start, end });
@@ -68,15 +86,57 @@ export default function Amenities() {
   }
 
   function handleSelectEvent(event) {
-    const b = event.resource;
-    if (isAdmin) {
-      const actions = [];
-      if (b.status === 'pending') actions.push('active');
-      actions.push('cancelled');
-      if (b.status === 'active') actions.push('finished');
-      const next = actions[0];
-      if (next && window.confirm(`¿Cambiar estado a "${next}"?`)) {
-        bookingService.updateStatus(b.id, next).then(loadData);
+    const next = { id: event.id };
+    selectionRef.current = next;
+    setSelection(next);
+    setActionError('');
+  }
+
+  function closeDetail() {
+    selectionRef.current = null;
+    setSelection(null);
+    setActionError('');
+  }
+
+  async function refreshBooking(id) {
+    if (requests.current.has(id)) return;
+    const request = Symbol();
+    requests.current.set(id, request);
+    setOperations(prev => ({ ...prev, [id]: 'refresh' }));
+    const ok = await loadData();
+    if (alive.current && requests.current.get(id) === request) {
+      requests.current.delete(id);
+      setRefreshErrors(prev => ({ ...prev, [id]: !ok }));
+      setOperations(prev => ({ ...prev, [id]: null }));
+      if (ok) setMsg('');
+    }
+  }
+
+  async function handleStatus(status) {
+    const booking = selectedBooking;
+    if (!isAdmin || !booking || requests.current.has(booking.id) || refreshErrors[booking.id]) return;
+    const selectionAtStart = selectionRef.current;
+    const request = Symbol();
+    requests.current.set(booking.id, request);
+    reads.current += 1;
+    setOperations(prev => ({ ...prev, [booking.id]: status }));
+    setActionError('');
+    const current = () => alive.current && requests.current.get(booking.id) === request;
+    try {
+      const { data } = await bookingService.updateStatus(booking.id, status, booking.status);
+      if (!current()) return;
+      reads.current += 1;
+      // Commit response is authoritative even when optional readback fails.
+      setEvents(prev => prev.map(event => event.id === booking.id ? { ...event, resource: { ...event.resource, ...data } } : event));
+      const ok = await loadData();
+      if (current()) setRefreshErrors(prev => ({ ...prev, [booking.id]: !ok }));
+    } catch (err) {
+      if (current() && selectionRef.current === selectionAtStart) setActionError(getErrorMessage(err, 'Error al actualizar reserva'));
+      if (current() && err?.response?.status === 409) setRefreshErrors(prev => ({ ...prev, [booking.id]: true }));
+    } finally {
+      if (current()) {
+        requests.current.delete(booking.id);
+        setOperations(prev => ({ ...prev, [booking.id]: null }));
       }
     }
   }
@@ -121,6 +181,24 @@ export default function Amenities() {
     <div style={s.container}>
       <h2 style={s.heading}>{isAdmin ? 'Reservas de Amenities' : 'Reservar Amenity'}</h2>
       {msg && <p style={s.msg}>{msg}</p>}
+
+      {selectedBooking && (
+        <div style={s.overlay} onClick={closeDetail}>
+          <div role="dialog" aria-modal="true" aria-label="Detalle de reserva" style={s.modal} onClick={e => e.stopPropagation()}>
+            <h3>{selectedEvent.title}</h3>
+            <p>Estado: {bookingStatusLabels[selectedBooking.status] || 'Estado no disponible'}</p>
+            <p>{selectedEvent.start.toLocaleString('es-AR', { hourCycle: 'h23' })} → {selectedEvent.end.toLocaleString('es-AR', { hourCycle: 'h23' })}</p>
+            {actionError && <p role="alert">{actionError}</p>}
+            {refreshErrors[selectedBooking.id] && <div role="alert"><p>No se pudo actualizar la lectura de la reserva. El último cambio confirmado se conserva.</p><button style={s.submitBtn} disabled={Boolean(operations[selectedBooking.id])} onClick={() => refreshBooking(selectedBooking.id)}>Reintentar actualización</button></div>}
+            {isAdmin && getBookingActions(selectedBooking.status).map(status => (
+              <button key={status} style={s.submitBtn} disabled={Boolean(operations[selectedBooking.id]) || Boolean(refreshErrors[selectedBooking.id])} onClick={() => handleStatus(status)}>
+                {operations[selectedBooking.id] === status ? { active: 'Aprobando...', finished: 'Finalizando...', cancelled: 'Cancelando...' }[status] : { active: 'Aprobar', finished: 'Finalizar', cancelled: 'Cancelar reserva' }[status]}
+              </button>
+            ))}
+            <button style={s.cancelBtn} onClick={closeDetail}>Cerrar</button>
+          </div>
+        </div>
+      )}
 
       <div style={s.calendarWrap}>
         <Calendar
@@ -174,7 +252,7 @@ export default function Amenities() {
           <div style={s.modal} onClick={(e) => e.stopPropagation()}>
             <h3 style={s.modalTitle}>Nueva reserva</h3>
             <p style={s.modalInfo}>
-              {selectedSlot?.start.toLocaleString('es-AR')} → {selectedSlot?.end.toLocaleString('es-AR')}
+              {selectedSlot?.start.toLocaleString('es-AR', { hourCycle: 'h23' })} → {selectedSlot?.end.toLocaleString('es-AR', { hourCycle: 'h23' })}
             </p>
             <form onSubmit={handleCreate}>
               <label style={s.label}>Amenity</label>
