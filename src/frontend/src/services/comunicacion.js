@@ -19,6 +19,9 @@ export const announcementService = {
 };
 
 export const ticketService = {
+  get(id) {
+    return api.get(`/tickets/${id}`);
+  },
   listAll(page = 1, filters = {}) {
     return api.get('/tickets', { params: { page, limit: 10, ...filters } });
   },

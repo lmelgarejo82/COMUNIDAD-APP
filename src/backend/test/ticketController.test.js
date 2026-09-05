@@ -238,3 +238,36 @@ test('admin cannot update status for ticket from another community', async () =>
 
   assert.equal(res.statusCode, 403);
 });
+
+for (const [status, label] of [['sent', 'Abierto'], ['in_review', 'En revisión'], ['in_progress', 'En proceso'], ['resolved', 'Resuelto'], ['closed', 'Cerrado'], ['cancelled', 'Cancelado']]) {
+  test(`status ${status} notifies the resident with its Spanish label`, async () => {
+    clearController();
+    baseMocks({ ticketImpl: { async findById() { return { id: 44, community_id: 1, user_id: 10, title: 'Agua', status: 'sent' }; } } });
+    const notifications = [];
+    mockModule(notificationPath, { Notification: { async create(data) { notifications.push(data); } } });
+    const res = createResponse();
+    await require(controllerPath).updateStatus({ user: { id: 1, role: 'admin' }, communityId: 1, params: { id: 44 }, body: { status } }, res);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(notifications, [{ user_id: 10, type: 'ticket_update', title: 'Ticket actualizado', message: `Tu ticket "Agua" ahora está "${label}"`, reference_id: 44 }]);
+  });
+}
+
+for (const [role, owner, community, expected, notify] of [['admin', 10, 1, 201, true], ['admin', 1, 1, 201, false], ['residente', 1, 1, 201, false], ['residente', 10, 1, 403, false], ['admin', 10, 2, 403, false]]) {
+  test(`reply ${role}/owner${owner}/community${community} preserves recipients and access`, async () => {
+    clearController();
+    const mutations = [], notifications = [];
+    baseMocks({ ticketImpl: {
+      async findById() { return { id: 44, community_id: community, user_id: owner, title: 'Agua', status: 'sent' }; },
+      async addReply(data) { mutations.push(data); return { id: 80, ...data }; },
+      async updateStatus(id, status) { mutations.push([id, status]); },
+    } });
+    mockModule(notificationPath, { Notification: { async create(data) { notifications.push(data); } } });
+    const res = createResponse();
+    await require(controllerPath).addReply({ user: { id: 1, role }, communityId: 1, params: { id: 44 }, body: { message: 'Actualización' } }, res);
+    assert.equal(res.statusCode, expected);
+    assert.equal(notifications.length, Number(notify));
+    if (notify) assert.deepEqual(notifications[0], { user_id: owner, type: 'ticket_reply', title: 'Respuesta a tu ticket', message: 'Nueva respuesta en "Agua"', reference_id: 44 });
+    if (expected === 403) assert.equal(mutations.length, 0);
+    if (expected === 201 && role === 'admin') assert.deepEqual(mutations[1], [44, 'in_progress']);
+  });
+}

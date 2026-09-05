@@ -25,6 +25,11 @@ export async function renderPage(name, boundaries) {
       return [slots[i], next => { writes.push(mounted); slots[i] = typeof next === 'function' ? next(slots[i]) : next; }];
     },
     useRef(initial) { const i = cursor++; return slots[i] ||= { current: initial }; },
+    useMemo(fn, deps) {
+      const i = cursor++;
+      if (!slots[i] || deps.some((x, n) => x !== slots[i].deps[n])) slots[i] = { value: fn(), deps };
+      return slots[i].value;
+    },
     useCallback(fn, deps) {
       const i = cursor++;
       if (!slots[i] || deps.some((x, n) => x !== slots[i].deps[n])) slots[i] = { fn, deps };
@@ -47,7 +52,7 @@ export async function renderPage(name, boundaries) {
     b.onLoad({ filter: /.*/, namespace: 'empty' }, () => ({ contents: '' }));
   } }] });
   const module = { exports: {} };
-  vm.runInNewContext(result.outputFiles[0].text, { module, exports: module.exports, mocks, console, FormData, window: { confirm: () => false } });
+  vm.runInNewContext(result.outputFiles[0].text, { module, exports: module.exports, mocks, console, FormData, window: { confirm: () => false, innerWidth: 1366, addEventListener() {}, removeEventListener() {} } });
   let tree;
   const render = () => {
     cursor = 0; tree = module.exports.default();

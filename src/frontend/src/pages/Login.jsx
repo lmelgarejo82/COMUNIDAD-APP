@@ -32,10 +32,10 @@ export default function Login() {
           <p role="status" style={styles.success}>Contraseña actualizada. Ya podés ingresar.</p>
         )}
         {error && <p style={styles.error}>{error}</p>}
-        <label style={styles.label}>Email</label>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={styles.input}           placeholder="admin1@comunidad.app" />
-        <label style={styles.label}>Contraseña</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required style={styles.input} placeholder="admin123" />
+        <label htmlFor="login-email" style={styles.label}>Email</label>
+        <input id="login-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={styles.input} placeholder="Tu email" />
+        <label htmlFor="login-password" style={styles.label}>Contraseña</label>
+        <input id="login-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required style={styles.input} placeholder="Tu contraseña" />
         <button type="submit" disabled={loading} style={styles.button}>
           {loading ? 'Ingresando...' : 'Ingresar'}
         </button>

@@ -33,6 +33,7 @@ const upload = multer({
 router.post('/', authenticate, authorize('residente'), setCommunity, sanitize('title', 'description'), upload.single('file'), trackUploadedFile, ticketController.create, handleUploadError);
 router.get('/', authenticate, authorize('admin'), setCommunity, ticketController.listAll);
 router.get('/my', authenticate, authorize('residente'), setCommunity, ticketController.listMy);
+router.get('/:id', authenticate, authorize('admin', 'residente'), setCommunity, ticketController.get);
 router.put('/:id/status', authenticate, authorize('admin'), setCommunity,
   logAudit('UPDATE_TICKET_STATUS', (req) => ({ ticketId: req.params.id, status: req.body.status })),
   ticketController.updateStatus);

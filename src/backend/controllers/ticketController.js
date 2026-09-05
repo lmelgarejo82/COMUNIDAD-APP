@@ -5,6 +5,24 @@ const { invalidatePattern } = require('../cache');
 const VALID_CATEGORIES = new Set(['maintenance', 'cleaning', 'security', 'coexistence', 'administration', 'amenities', 'other']);
 const VALID_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
 const VALID_STATUSES = new Set(['sent', 'in_review', 'in_progress', 'resolved', 'closed', 'cancelled']);
+const STATUS_LABELS = { sent: 'Abierto', in_review: 'En revisión', in_progress: 'En proceso', resolved: 'Resuelto', closed: 'Cerrado', cancelled: 'Cancelado' };
+
+exports.get = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) > 2147483647) {
+      return res.status(404).json({ error: 'Ticket no encontrado' });
+    }
+    const ownerId = req.user.role === 'admin' ? null : req.user.id;
+    const ticket = await Ticket.findDetail(id, req.communityId, ownerId);
+    if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado' });
+    const replies = await Ticket.getReplies(id, req.communityId, ownerId);
+    res.json({ ...ticket, replies });
+  } catch (err) {
+    console.error('Error en get ticket:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
 
 exports.create = async (req, res) => {
   try {
@@ -87,7 +105,7 @@ exports.updateStatus = async (req, res) => {
       user_id: ticket.user_id,
       type: 'ticket_update',
       title: 'Ticket actualizado',
-      message: `Tu ticket "${ticket.title}" ahora está "${status}"`,
+      message: `Tu ticket "${ticket.title}" ahora está "${STATUS_LABELS[status]}"`,
       reference_id: id,
     });
 

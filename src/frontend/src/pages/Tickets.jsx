@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ticketService } from '../services/comunicacion';
 import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/Spinner';
@@ -19,7 +19,7 @@ const PRIORITY_OPTIONS = [
   { value: 'low', label: 'Baja', hint: 'Puede esperar', color: t.colors.textSecondary, bg: t.colors.border },
   { value: 'medium', label: 'Media', hint: 'Requiere seguimiento', color: t.colors.accent, bg: t.colors.accentSoft },
   { value: 'high', label: 'Alta', hint: 'Afecta la operación', color: t.colors.danger, bg: t.colors.dangerSoft },
-  { value: 'urgent', label: 'Urgente', hint: 'Atención inmediata', color: t.colors.dangerHover, bg: '#FCE3E0', glow: true },
+  { value: 'urgent', label: 'Urgente', hint: 'Impacto crítico', color: t.colors.dangerHover, bg: '#FCE3E0', glow: true },
 ];
 
 const STATUS_OPTIONS = [
@@ -29,13 +29,6 @@ const STATUS_OPTIONS = [
   { value: 'resolved', label: 'Resuelto', color: t.colors.success, bg: t.colors.successSoft },
   { value: 'closed', label: 'Cerrado', color: t.colors.textSecondary, bg: t.colors.border },
   { value: 'cancelled', label: 'Cancelado', color: t.colors.danger, bg: t.colors.dangerSoft },
-];
-
-const TAB_OPTIONS = [
-  { value: 'all', label: 'Todos' },
-  { value: 'mine', label: 'Míos' },
-  { value: 'unassigned', label: 'Sin asignar', disabled: true, reason: 'Pendiente de asignación real' },
-  { value: 'overdue', label: 'Vencidos', disabled: true, reason: 'Pendiente de SLA real' },
 ];
 
 const KPI_FILTERS = {
@@ -132,27 +125,6 @@ function TicketKpiCard({ label, value, hint, color, active, onClick }) {
   );
 }
 
-function TicketTabs({ active, onChange, isAdmin, counts }) {
-  const visibleTabs = isAdmin ? TAB_OPTIONS : TAB_OPTIONS.filter(tab => ['all', 'mine'].includes(tab.value));
-  return (
-    <div style={styles.tabs}>
-      {visibleTabs.map(tab => (
-        <button
-          key={tab.value}
-          type="button"
-          disabled={tab.disabled}
-          title={tab.reason || ''}
-          onClick={() => !tab.disabled && onChange(tab.value)}
-          style={tab.disabled ? styles.tabDisabled : active === tab.value ? styles.tabActive : styles.tab}
-        >
-          {tab.label}
-          <span style={styles.tabCount}>{tab.disabled ? 0 : counts[tab.value] || 0}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function TicketFilters({ filters, onChange, onClear, compact }) {
   return (
     <section style={compact ? styles.filterBarCompact : styles.filterBar}>
@@ -183,10 +155,9 @@ function TicketFilters({ filters, onChange, onClear, compact }) {
   );
 }
 
-function ActiveFilterSummary({ quickFilter, filters, activeTab, onClearQuick, onClearField, onClearAll }) {
+function ActiveFilterSummary({ quickFilter, filters, onClearQuick, onClearField, onClearAll }) {
   const chips = [];
   if (quickFilter) chips.push({ key: 'quick', label: `Filtro rápido: ${quickFilter.label}`, onClear: onClearQuick });
-  if (activeTab !== 'all') chips.push({ key: 'tab', label: `Vista: ${optionLabel(TAB_OPTIONS, activeTab)}`, onClear: () => onClearField('tab') });
   if (filters.query) chips.push({ key: 'query', label: `Búsqueda: ${filters.query}`, onClear: () => onClearField('query') });
   if (filters.date === 'today') chips.push({ key: 'date', label: 'Hoy', onClear: () => onClearField('date') });
   if (filters.category) chips.push({ key: 'category', label: optionLabel(CATEGORY_OPTIONS, filters.category), onClear: () => onClearField('category') });
@@ -235,7 +206,7 @@ function TicketCreatePanel({ form, saving, onChange, onCancel, onSubmit, reporte
                 </button>
               ))}
             </div>
-            <p style={styles.hint}>Seleccioná la prioridad según el impacto en la comunidad. Los urgentes notifican al admin inmediatamente.</p>
+            <p style={styles.hint}>Seleccioná la prioridad según el impacto en la comunidad. La prioridad no garantiza un plazo de respuesta.</p>
           </section>
 
           <section style={styles.panelSection}>
@@ -268,7 +239,7 @@ function TicketCreatePanel({ form, saving, onChange, onCancel, onSubmit, reporte
   );
 }
 
-function TicketDetailPanel({ ticket, isAdmin, saving, replyMsg, onReplyMsg, onReply, onStatusChange, onClose }) {
+function TicketDetailPanel({ ticket, isAdmin, saving, detailLoading, detailError, detailMsg, retrying, onRetry, replyMsg, onReplyMsg, onReply, onStatusChange, onClose }) {
   const timeline = buildTimeline(ticket);
   return (
     <div style={styles.overlay} onClick={onClose}>
@@ -279,6 +250,10 @@ function TicketDetailPanel({ ticket, isAdmin, saving, replyMsg, onReplyMsg, onRe
           onClose={onClose}
         />
         <div style={styles.panelBody}>
+          {detailMsg && <p role="status" style={styles.hint}>{detailMsg}</p>}
+          {detailLoading && <p role="status">Cargando historial...</p>}
+          {detailError && <p role="alert">{detailError}</p>}
+          {(detailLoading || detailError) && <button type="button" disabled={retrying} onClick={onRetry} style={t.secondaryBtn}>Reintentar historial</button>}
           <div style={styles.chipRow}>
             <TicketCategoryChip category={ticket.category} />
             <TicketPriorityChip priority={ticket.priority} />
@@ -305,11 +280,7 @@ function TicketDetailPanel({ ticket, isAdmin, saving, replyMsg, onReplyMsg, onRe
                   </button>
                 ))}
               </div>
-              <label style={styles.inlineCheck}>
-                <input type="checkbox" disabled />
-                Notificar al residente
-              </label>
-              <span style={styles.hint}>La notificación queda preparada visualmente; no se envía nada automático en este bloque.</span>
+              <p style={styles.hint}>Los cambios de estado generan una notificación dentro de la app para quien reportó el ticket. Las respuestas de administración también notifican al residente, salvo que responda a su propio ticket.</p>
             </section>
           )}
 
@@ -468,13 +439,12 @@ function computeTicketKpis(baseTickets) {
   };
 }
 
-function filterTickets(baseTickets, filters, quickFilter, activeTab, { isAdmin, userId }) {
+function filterTickets(baseTickets, filters, quickFilter) {
   return baseTickets.filter(ticket => {
     if (quickFilter?.field && ticket[quickFilter.field] !== quickFilter.value) return false;
     if (filters.category && ticket.category !== filters.category) return false;
     if (filters.priority && ticket.priority !== filters.priority) return false;
     if (!matchesSearch(ticket, filters)) return false;
-    if (activeTab === 'mine' && isAdmin && ticket.user_id !== userId) return false;
     return true;
   });
 }
@@ -491,12 +461,23 @@ export default function Tickets() {
   const [form, setForm] = useState(initialForm);
   const [filters, setFilters] = useState(initialFilters);
   const [quickFilter, setQuickFilter] = useState(null);
-  const [activeTab, setActiveTab] = useState('all');
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [detailMsg, setDetailMsg] = useState('');
+  const [detailSaving, setDetailSaving] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const panel = useRef(null);
+  const readVersion = useRef(0);
+  const mounted = useRef(true);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
   const isAdmin = user?.role === 'admin';
 
   useEffect(() => { load(); }, [isAdmin]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; panel.current = null; readVersion.current += 1; };
+  }, []);
   useEffect(() => {
     const onResize = () => setIsNarrow(window.innerWidth < 760);
     window.addEventListener('resize', onResize);
@@ -520,16 +501,9 @@ export default function Tickets() {
 
   const kpis = useMemo(() => computeTicketKpis(tickets), [tickets]);
 
-  const tabCounts = useMemo(() => ({
-    all: tickets.length,
-    mine: isAdmin ? tickets.filter(ticket => ticket.user_id === user?.id).length : tickets.length,
-    unassigned: 0,
-    overdue: 0,
-  }), [tickets, isAdmin, user?.id]);
-
   const visibleTickets = useMemo(
-    () => filterTickets(tickets, filters, quickFilter, activeTab, { isAdmin, userId: user?.id }),
-    [tickets, filters, quickFilter, activeTab, isAdmin, user?.id]
+    () => filterTickets(tickets, filters, quickFilter),
+    [tickets, filters, quickFilter]
   );
 
   function updateForm(field, value) {
@@ -559,50 +533,88 @@ export default function Tickets() {
   function clearAllFilters() {
     setFilters(initialFilters);
     setQuickFilter(null);
-    setActiveTab('all');
   }
 
   function clearFilterField(field) {
-    if (field === 'tab') {
-      setActiveTab('all');
-      return;
-    }
     setFilters(prev => ({ ...prev, [field]: '' }));
   }
 
-  async function handleStatusChange(ticketId, status) {
-    setSaving(true);
-    setMsg('');
-    setError('');
+  const isCurrentPanel = owner => mounted.current && panel.current === owner;
+
+  async function readDetail(owner, { retry = false, committed = false } = {}) {
+    if (!isCurrentPanel(owner) || (retry && owner.retrying)) return;
+    const version = ++readVersion.current;
+    owner.ready = false;
+    owner.retrying = retry;
+    setDetailLoading(true);
+    setRetrying(retry);
+    setDetailError('');
     try {
-      const { data } = await ticketService.updateStatus(ticketId, status);
-      setMsg('Estado actualizado');
-      setSelected(prev => prev?.id === ticketId ? { ...prev, ...data } : prev);
-      await load();
+      const { data } = await ticketService.get(owner.id);
+      if (!isCurrentPanel(owner) || version !== readVersion.current) return;
+      owner.ready = true;
+      owner.committed = false;
+      setSelected(data);
+      setTickets(prev => prev.map(row => row.id === data.id ? { ...row, ...data } : row));
     } catch (err) {
-      setError(getErrorMessage(err, 'Error al actualizar estado'));
+      if (!isCurrentPanel(owner) || version !== readVersion.current) return;
+      setDetailError(committed || owner.committed
+        ? 'El cambio se guardó, pero no se pudo actualizar el historial. Reintentá la lectura antes de continuar.'
+        : getErrorMessage(err, 'No se pudo cargar el historial. Reintentá antes de continuar.'));
     } finally {
-      setSaving(false);
+      if (isCurrentPanel(owner) && version === readVersion.current) {
+        owner.retrying = false;
+        setDetailLoading(false);
+        setRetrying(false);
+      }
     }
   }
 
-  async function handleReply(e) {
-    e.preventDefault();
-    if (!replyMsg.trim() || !selected) return;
-    setSaving(true);
-    setMsg('');
-    setError('');
+  async function mutateDetail(kind, value) {
+    const owner = panel.current;
+    if (!owner?.ready || owner.operation) return;
+    const operation = {};
+    owner.operation = operation;
+    setDetailSaving(true);
+    setDetailMsg('');
     try {
-      const { data } = await ticketService.addReply(selected.id, replyMsg.trim());
-      setReplyMsg('');
-      setSelected(prev => prev ? { ...prev, replies: [...(prev.replies || []), data] } : prev);
-      setMsg('Actualización agregada');
-      await load();
+      const { data } = kind === 'reply'
+        ? await ticketService.addReply(owner.id, value)
+        : await ticketService.updateStatus(owner.id, value);
+      if (!isCurrentPanel(owner)) return;
+      owner.committed = true;
+      owner.ready = false;
+      if (kind === 'reply') {
+        setReplyMsg('');
+        setSelected(prev => ({ ...prev, replies: [...(prev.replies || []).filter(row => row.id !== data.id), data] }));
+        setDetailMsg('Actualización agregada');
+      } else {
+        setSelected(prev => ({ ...prev, ...data, replies: prev.replies }));
+        setTickets(prev => prev.map(row => row.id === owner.id ? { ...row, ...data } : row));
+        setDetailMsg('Estado actualizado');
+      }
+      owner.operation = null;
+      setDetailSaving(false);
+      await readDetail(owner, { committed: true });
     } catch (err) {
-      setError(getErrorMessage(err, 'Error al responder'));
+      if (isCurrentPanel(owner)) setDetailMsg(getErrorMessage(err, kind === 'reply' ? 'Error al responder' : 'Error al actualizar estado'));
     } finally {
-      setSaving(false);
+      if (isCurrentPanel(owner) && owner.operation === operation) {
+        owner.operation = null;
+        setDetailSaving(false);
+      }
     }
+  }
+
+  function handleStatusChange(ticketId, status) {
+    if (panel.current?.id !== ticketId) return;
+    return mutateDetail('status', status);
+  }
+
+  function handleReply(e) {
+    e.preventDefault();
+    if (!replyMsg.trim()) return;
+    return mutateDetail('reply', replyMsg.trim());
   }
 
   async function handleCreate(e) {
@@ -633,16 +645,27 @@ export default function Tickets() {
   }
 
   function openTicket(ticket) {
+    const owner = { id: ticket.id, ready: false, operation: null, committed: false, retrying: false };
+    panel.current = owner;
     setSelected(ticket);
+    setDetailSaving(false);
+    setDetailMsg('');
     setReplyMsg('');
     setMsg('');
     setError('');
+    readDetail(owner);
+  }
+
+  function closeTicket() {
+    panel.current = null;
+    readVersion.current += 1;
+    setSelected(null);
   }
 
   const subtitle = isAdmin
     ? `Gestión de incidencias del complejo · ${tickets.length} tickets totales`
     : `Tus tickets y reclamos · ${kpis.active} activos`;
-  const hasClientFilters = Boolean(filters.query || filters.date || filters.unit || filters.category || filters.priority || activeTab !== 'all' || quickFilter);
+  const hasClientFilters = Boolean(filters.query || filters.date || filters.unit || filters.category || filters.priority || quickFilter);
 
   return (
     <div style={t.page}>
@@ -665,18 +688,16 @@ export default function Tickets() {
       )}
 
       <section style={styles.kpiGrid}>
-        <TicketKpiCard label="Abiertos" value={kpis.opened} hint="Sin tomar" color={t.colors.info} active={quickFilter?.value === 'sent'} onClick={() => applyKpiFilter('sent')} />
+        <TicketKpiCard label="Abiertos" value={kpis.opened} hint="Estado inicial" color={t.colors.info} active={quickFilter?.value === 'sent'} onClick={() => applyKpiFilter('sent')} />
         <TicketKpiCard label="En revisión" value={kpis.review} hint="En análisis" color={t.colors.info} active={quickFilter?.value === 'in_review'} onClick={() => applyKpiFilter('in_review')} />
         <TicketKpiCard label="En proceso" value={kpis.progress} hint="Con seguimiento" color={t.colors.accent} active={quickFilter?.value === 'in_progress'} onClick={() => applyKpiFilter('in_progress')} />
         <TicketKpiCard label="Resueltos" value={kpis.resolved} hint="Finalizados" color={t.colors.success} active={quickFilter?.value === 'resolved'} onClick={() => applyKpiFilter('resolved')} />
         <TicketKpiCard label="Urgentes" value={kpis.urgent} hint="Prioridad máxima" color={t.colors.danger} active={quickFilter?.value === 'urgent'} onClick={() => applyKpiFilter('urgent')} />
       </section>
 
-      <TicketTabs active={activeTab} onChange={setActiveTab} isAdmin={isAdmin} counts={tabCounts} />
       <ActiveFilterSummary
         quickFilter={quickFilter}
         filters={filters}
-        activeTab={activeTab}
         onClearQuick={() => setQuickFilter(null)}
         onClearField={clearFilterField}
         onClearAll={clearAllFilters}
@@ -718,12 +739,17 @@ export default function Tickets() {
         <TicketDetailPanel
           ticket={selected}
           isAdmin={isAdmin}
-          saving={saving}
+          saving={detailSaving || detailLoading || !panel.current?.ready}
+          detailLoading={detailLoading}
+          detailError={detailError}
+          detailMsg={detailMsg}
+          retrying={retrying}
+          onRetry={() => readDetail(panel.current, { retry: true })}
           replyMsg={replyMsg}
           onReplyMsg={setReplyMsg}
           onReply={handleReply}
           onStatusChange={handleStatusChange}
-          onClose={() => setSelected(null)}
+          onClose={closeTicket}
         />
       )}
     </div>
@@ -738,11 +764,6 @@ const styles = {
   kpiActiveMark: { fontSize: '0.62rem', color: t.colors.primary, background: t.colors.white, border: `1px solid ${t.colors.border}`, borderRadius: '999px', padding: '0 0.35rem' },
   kpiValue: { fontSize: '1.25rem', color: t.colors.textPrimary, lineHeight: 1 },
   kpiHint: { fontSize: '0.72rem', color: t.colors.textSecondary },
-  tabs: { ...t.card, padding: '0.35rem', display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.6rem' },
-  tab: { border: 'none', background: 'transparent', color: t.colors.textSecondary, borderRadius: t.radius.input, padding: '0.42rem 0.65rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', display: 'flex', gap: '0.35rem', alignItems: 'center' },
-  tabActive: { border: 'none', background: t.colors.primarySoft, color: t.colors.primary, borderRadius: t.radius.input, padding: '0.42rem 0.65rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', display: 'flex', gap: '0.35rem', alignItems: 'center' },
-  tabDisabled: { border: 'none', background: 'transparent', color: t.colors.textDisabled, borderRadius: t.radius.input, padding: '0.42rem 0.65rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'not-allowed', display: 'flex', gap: '0.35rem', alignItems: 'center', opacity: 0.65 },
-  tabCount: { fontSize: '0.68rem', background: t.colors.white, border: `1px solid ${t.colors.border}`, color: t.colors.textSecondary, borderRadius: '999px', padding: '0 0.35rem' },
   activeFilters: { ...t.card, padding: '0.55rem 0.65rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.6rem' },
   activeFiltersLabel: { fontSize: '0.73rem', color: t.colors.textSecondary, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0 },
   filterChip: { border: `1px solid ${t.colors.primary}`, background: t.colors.primarySoft, color: t.colors.primary, borderRadius: '999px', padding: '0.25rem 0.55rem', fontSize: '0.76rem', fontWeight: 700, cursor: 'pointer' },
@@ -796,7 +817,6 @@ const styles = {
   detailGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: '0.45rem', fontSize: '0.78rem', color: t.colors.textSecondary },
   detailField: { display: 'grid', gap: '0.12rem' },
   statusActions: { display: 'flex', gap: '0.4rem', flexWrap: 'wrap' },
-  inlineCheck: { display: 'flex', gap: '0.4rem', alignItems: 'center', fontSize: '0.8rem', color: t.colors.textSecondary },
   timeline: { display: 'grid', gap: '0.65rem' },
   timelineItem: { display: 'grid', gridTemplateColumns: '12px 1fr', gap: '0.55rem', alignItems: 'flex-start', fontSize: '0.8rem', color: t.colors.textSecondary },
   timelineDot: { width: '9px', height: '9px', borderRadius: '50%', background: t.colors.info, marginTop: '0.28rem', boxShadow: `0 0 0 3px ${t.colors.primarySoft}` },

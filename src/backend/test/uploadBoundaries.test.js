@@ -109,7 +109,7 @@ test('all upload routes accept the product maximum and reject one byte more befo
       upload: uploadController('document'), list: noop,
     });
     mockModule(require.resolve('../controllers/ticketController'), {
-      create: uploadController('ticket'), listAll: noop, listMy: noop,
+      create: uploadController('ticket'), listAll: noop, listMy: noop, get: noop,
       updateStatus: noop, update: noop, addReply: uploadController('ticket reply'),
     });
     mockModule(require.resolve('../controllers/announcementController'), {

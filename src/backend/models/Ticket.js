@@ -31,6 +31,16 @@ const Ticket = {
     return rows[0] || null;
   },
 
+  async findDetail(id, communityId, ownerId = null) {
+    const { rows } = await pool.query(
+      `SELECT t.*, u.email AS user_email FROM tickets t
+       LEFT JOIN users u ON t.user_id = u.id
+       WHERE t.id = $1 AND t.community_id = $2 AND t.deleted_at IS NULL
+         AND ($3::integer IS NULL OR t.user_id = $3)`, [id, communityId, ownerId]
+    );
+    return rows[0] || null;
+  },
+
   async findByCommunity(communityId, { status, category, priority, page = 1, limit = 10 } = {}) {
     const offset = (parseInt(page) - 1) * parseInt(limit);
     let whereClause = 'WHERE t.community_id = $1 AND t.deleted_at IS NULL';
@@ -122,9 +132,12 @@ const Ticket = {
     return rows[0];
   },
 
-  async getReplies(ticketId) {
+  async getReplies(ticketId, communityId, ownerId = null) {
     const { rows } = await pool.query(
-      'SELECT * FROM ticket_replies WHERE ticket_id = $1 ORDER BY created_at ASC', [ticketId]
+      `SELECT r.* FROM ticket_replies r JOIN tickets t ON t.id = r.ticket_id
+       WHERE t.id = $1 AND t.community_id = $2 AND t.deleted_at IS NULL
+         AND ($3::integer IS NULL OR t.user_id = $3)
+       ORDER BY r.created_at ASC, r.id ASC`, [ticketId, communityId, ownerId]
     );
     return rows;
   }
