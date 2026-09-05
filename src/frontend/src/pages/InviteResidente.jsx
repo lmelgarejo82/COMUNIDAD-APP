@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../services/api';
 import { getErrorMessage } from '../services/errors';
 import UnitSearchSelect from '../components/access/UnitSearchSelect';
 import { useCommunity } from '../context/CommunityContext';
-import { inviteStatusLabel, partitionInvites } from '../utils/invitePresentation';
+import {
+  addResendingInvite,
+  createInviteRequestTracker,
+  inviteStatusLabel,
+  partitionInvites,
+  removeResendingInvite,
+} from '../utils/invitePresentation';
 
 export default function InviteResidente() {
   const { selectedId } = useCommunity();
@@ -14,20 +20,44 @@ export default function InviteResidente() {
   const [invites, setInvites] = useState([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState('');
-  const [resendingId, setResendingId] = useState(null);
+  const [resendingIds, setResendingIds] = useState(new Set());
+  const mountedRef = useRef(false);
+  const requestTrackerRef = useRef(null);
+  const resendingIdsRef = useRef(new Set());
+
+  if (!requestTrackerRef.current) {
+    requestTrackerRef.current = createInviteRequestTracker();
+  }
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestTrackerRef.current.invalidate();
+    };
+  }, []);
 
   const loadInvites = useCallback(async () => {
-    setListLoading(true);
-    setListError('');
+    const requestId = requestTrackerRef.current.begin();
+    const isCurrentRequest = () => (
+      mountedRef.current && requestTrackerRef.current.isCurrent(requestId)
+    );
+
+    if (isCurrentRequest()) {
+      setListLoading(true);
+      setListError('');
+    }
     try {
       const { data } = await api.get('/admin/invites', {
         params: selectedId ? { complex: selectedId } : undefined,
       });
-      setInvites(data);
+      if (isCurrentRequest()) setInvites(data);
     } catch (err) {
-      setListError(getErrorMessage(err, 'No pudimos cargar las invitaciones.'));
+      if (isCurrentRequest()) {
+        setListError(getErrorMessage(err, 'No pudimos cargar las invitaciones.'));
+      }
     } finally {
-      setListLoading(false);
+      if (isCurrentRequest()) setListLoading(false);
     }
   }, [selectedId]);
 
@@ -37,6 +67,23 @@ export default function InviteResidente() {
 
   function handleChange(e) {
     setForm({ ...form, [e.target.name]: e.target.value });
+  }
+
+  function startResending(inviteId) {
+    const nextIds = addResendingInvite(resendingIdsRef.current, inviteId);
+    if (nextIds === resendingIdsRef.current) return false;
+
+    resendingIdsRef.current = nextIds;
+    if (mountedRef.current) setResendingIds(() => nextIds);
+    return true;
+  }
+
+  function settleResending(inviteId) {
+    const nextIds = removeResendingInvite(resendingIdsRef.current, inviteId);
+    if (nextIds === resendingIdsRef.current) return;
+
+    resendingIdsRef.current = nextIds;
+    if (mountedRef.current) setResendingIds(() => nextIds);
   }
 
   async function handleSubmit(e) {
@@ -54,6 +101,7 @@ export default function InviteResidente() {
         unit_id: form.unit_id,
         ownership_type: form.ownership_type,
       });
+      if (!mountedRef.current) return;
       if (data.email_sent === false) {
         setMsgType('warning');
         setMsg(data.delivery_warning || 'La invitación fue creada, pero no se pudo enviar el email.');
@@ -64,35 +112,40 @@ export default function InviteResidente() {
       setForm({ email: '', unit_id: null, unit_number: '', ownership_type: 'owner' });
       await loadInvites();
     } catch (err) {
-      setMsgType('error');
-      setMsg(getErrorMessage(err, 'Error al enviar invitación'));
+      if (mountedRef.current) {
+        setMsgType('error');
+        setMsg(getErrorMessage(err, 'Error al enviar invitación'));
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }
 
   async function handleResend(inviteId) {
-    setResendingId(inviteId);
-    setMsg('');
+    if (!startResending(inviteId)) return;
+    if (mountedRef.current) setMsg('');
     try {
       const { data } = await api.post(`/admin/invites/${inviteId}/resend`);
+      if (!mountedRef.current) return;
       setMsgType(data.email_sent ? 'success' : 'warning');
       setMsg(data.email_sent
         ? 'Invitación reenviada correctamente.'
         : data.delivery_warning || 'La invitación fue renovada, pero no se pudo enviar el email.');
       await loadInvites();
     } catch (err) {
-      setMsgType('error');
-      setMsg(getErrorMessage(err, 'No pudimos reenviar la invitación.'));
+      if (mountedRef.current) {
+        setMsgType('error');
+        setMsg(getErrorMessage(err, 'No pudimos reenviar la invitación.'));
+      }
     } finally {
-      setResendingId(null);
+      settleResending(inviteId);
     }
   }
 
   const { pending, history } = partitionInvites(invites);
 
   function renderInviteCard(invite) {
-    const isResending = resendingId === invite.id;
+    const isResending = resendingIds.has(invite.id);
     return (
       <article key={invite.id} style={s.inviteCard}>
         <strong style={s.email}>{invite.email}</strong>
