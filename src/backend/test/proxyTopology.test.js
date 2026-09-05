@@ -7,13 +7,13 @@ const repositoryRoot = path.join(__dirname, '..', '..', '..');
 
 test('Docker exposes the API only through an explicitly addressed Nginx proxy', () => {
   const compose = fs.readFileSync(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8');
-  const backendBlock = compose.match(/\n  backend:\n([\s\S]*?)\n  frontend:/)?.[1] || '';
-  const frontendBlock = compose.match(/\n  frontend:\n([\s\S]*?)\nvolumes:/)?.[1] || '';
+  const backendBlock = compose.match(/\r?\n  backend:\r?\n([\s\S]*?)\r?\n  frontend:/)?.[1] || '';
+  const frontendBlock = compose.match(/\r?\n  frontend:\r?\n([\s\S]*?)\r?\nvolumes:/)?.[1] || '';
 
   assert.match(backendBlock, /TRUST_PROXY_IP:\s*['"]?172\.30\.0\.2['"]?/);
-  assert.doesNotMatch(backendBlock, /\n\s+ports:/);
-  assert.match(backendBlock, /proxy:\s*\n\s+ipv4_address:\s*172\.30\.0\.3/);
-  assert.match(frontendBlock, /proxy:\s*\n\s+ipv4_address:\s*172\.30\.0\.2/);
+  assert.doesNotMatch(backendBlock, /\r?\n\s+ports:/);
+  assert.match(backendBlock, /proxy:\s*\r?\n\s+ipv4_address:\s*172\.30\.0\.3/);
+  assert.match(frontendBlock, /proxy:\s*\r?\n\s+ipv4_address:\s*172\.30\.0\.2/);
 });
 
 test('Nginx replaces untrusted forwarding headers and supplies the trusted scheme', () => {
