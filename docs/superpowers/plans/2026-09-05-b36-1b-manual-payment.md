@@ -19,7 +19,7 @@
 - Existing5MiB PDF/JPG/JPEG/PNG proof and10MiB PDF document limits remain authoritative.
 - Only new migration032 may extend payment status; do not edit applied migrations.
 - Commit DB before retaining an upload or attempting optional delivery.
-- Failed requests leave zero partial DB writes and no unassociated upload.
+- Known rejected/rolled-back requests leave zero partial DB writes and no unassociated upload. Unknown COMMIT outcome must not delete a potentially committed proof; preserve it if a bounded authoritative check cannot establish safe cleanup, and document the reconciliation boundary.
 - Use explicit Compose project `comunidad-app`; preserve non-QA rows/files/volumes and never emit secrets.
 - TDD before production edits, fresh task review, whole-block review and green publication gate.
 - Work continues under the parent controlled-pilot plan/ledger; no new approval pause or duplicate worker sequence.
@@ -74,7 +74,7 @@ fs.mkdirSync(UPLOAD_DIRECTORY, { recursive: true });
 
 ## Task 4b: Atomic manual proof backend
 
-**Files:** Modify `src/backend/controllers/expenseController.js`, `src/backend/models/Expense.js`, `src/backend/routes/expenses.js`, `src/backend/models/Dashboard.js`, `src/backend/models/ChatContext.js`; extend the smallest upload lifecycle helper only if needed for deterministic failed/disconnected-request cleanup. Create `src/backend/migrations/032_manual_payment_rejection.sql` and `src/backend/test/manualPayment.test.js`; extend focused existing upload/payment/tenant tests where their existing contract changes.
+**Files:** Modify `src/backend/controllers/expenseController.js`, `src/backend/models/Expense.js`, `src/backend/routes/expenses.js`, `src/backend/models/Dashboard.js`, `src/backend/models/ChatContext.js`; extend the smallest upload lifecycle helper only if needed for deterministic failed/disconnected-request cleanup. Add a small shared upload error middleware and wire equivalent upload routes to it. Create `src/backend/migrations/032_manual_payment_rejection.sql` and `src/backend/test/manualPayment.test.js`; extend focused existing upload/payment/tenant tests where their existing contract changes.
 
 **Interfaces:** Keep `submitPayment`, `confirmPayment`, and existing route URLs. Add `expenseController.rejectPayment` and admin-only `PUT /api/expenses/unit/:unitExpenseId/reject`. Success remains a unit_expenses row. Own invalid state is clear4xx; foreign/ineligible resource is safe404. Existing internal `Expense.confirmUnitExpense` used by MP remains independent from the stricter manual-review controller.
 
@@ -119,6 +119,7 @@ ALTER TABLE unit_expenses ADD CONSTRAINT unit_expenses_status_check
 Apply twice to representative QA schema to prove idempotence, preserve existing rows/old migration hashes, and reject unknown states. Discover the actual constraint name before execution; the default name comes from migration003.
 
 - [ ] Attach `upload.single('proof')` and `trackUploadedFile` after resident authentication/authorization/scope. Require an accepted file. Generate filename with `crypto.randomUUID()` and normalized allowed extension. Form body URL never creates an association.
+- [ ] Reproduce actual size/type/malformed-multipart failures through Multer (Task4a live document oversize already returned500 with no residue). Map those validation failures to clear4xx on equivalent upload routes with cleanup; retain actual storage/DB failures as5xx and do not weaken file limits or add a generic error/auth refactor.
 - [ ] Implement parent-expense-before-child locking shared by submission, manual review and amount re-split. Parent scoped lookup:
 
 ```sql
@@ -135,7 +136,7 @@ UPDATE unit_expenses SET status = 'in_review', payment_proof_url = $2,
 WHERE id = $1 AND status IN ('pending', 'rejected') RETURNING *;
 ```
 
-Admin approve/reject similarly binds community and requires `in_review` plus a stored proof; approve writes paid/confirmed timestamps, reject persists rejected. Capture prior proof before replacement and remove it only after committed new association. On error rollback, safely release/discard uncertain clients as Invite does; finalize failed upload cleanup even after client disconnect. Never remove a file whose association commits.
+Admin approve/reject similarly binds community and requires `in_review`; approve additionally requires a stored proof and writes paid/confirmed timestamps. Reject persists rejected even for an incomplete historical review without proof, allowing explicit resident resubmission. Do not rewrite existing paid/proofless history. Capture prior proof before replacement and remove it only after committed new association. On error rollback, safely release/discard uncertain clients as Invite does; finalize known failed upload cleanup even after client disconnect. Never remove a file whose association commits. Add separate tests for precommit rollback cleanup and ambiguous COMMIT preservation: a bounded fresh scoped/parent-synchronized association check may resolve the outcome; if not, preserve the candidate file and discard the client, documenting possible inaccessible-orphan reconciliation rather than claiming crash atomicity.
 
 - [ ] Reproduce destructive amount edit on a proof-bearing row. Lock expense in the same order, reject amount changes when any child has proof/payment activity, preserve metadata-only edits. Make `Expense.update` honor its supplied transaction client; allowed resplit writes share it. Test notification/DB failure cannot leave a partial resplit and a concurrent submission cannot be erased.
 - [ ] Replace undefined post-COMMIT `getUserPhone` call with phone in the existing scoped lookup, isolate optional delivery failures from committed success. Update only unpaid-state enumerations in Expense/Dashboard/ChatContext to include rejected. No Twilio integration activation.
@@ -145,7 +146,7 @@ Admin approve/reject similarly binds community and requires `in_review` plus a s
 
 **Files:** Modify `src/frontend/src/pages/Expensas.jsx`, `src/frontend/src/services/expensas.js`; create `src/frontend/src/services/protectedUploads.js`, `src/frontend/src/utils/manualPayment.js`, `src/frontend/test/manualPayment.test.js`. Update `docs/PILOT_READINESS.md` with actual outcomes, not assumed success.
 
-**Interfaces:** `createExpenseService(client = api)` exposes the existing expense methods and new `rejectPayment(id)`; default `expenseService` remains compatible. `downloadProtectedUpload(fileUrl, fileName, {client, browser})` permits only canonical generated `/uploads/<filename>` and uses an authenticated root-relative blob request. `validatePaymentProof(file)` returns a fixed message or null; `manualPaymentActions(status, role)` returns permitted UI actions (residente: submit for pending/rejected; admin: approve/reject for in_review; otherwise empty).
+**Interfaces:** `createExpenseService(client = api)` exposes the existing expense methods and new `rejectPayment(id)`; default `expenseService` remains compatible. `downloadProtectedUpload(fileUrl, fileName, {client, browser})` permits only canonical generated `/uploads/<filename>` and uses an authenticated root-relative blob request. `validatePaymentProof(file)` returns a fixed message or null; `manualPaymentActions(status, role, hasProof)` returns permitted UI actions (residente: submit for pending/rejected; admin: approve/reject for in_review with proof, only reject without proof; otherwise empty).
 
 - [ ] Write RED service/action tests including actual multipart field and rejection route:
 
@@ -159,7 +160,8 @@ assert.equal(calls[0][0], '/expenses/unit/41/pay');
 assert.equal(calls[0][1].get('proof').name, 'proof.pdf');
 await service.rejectPayment(41);
 assert.equal(calls[1][0], '/expenses/unit/41/reject');
-assert.deepEqual(manualPaymentActions('in_review', 'admin'), ['approve', 'reject']);
+assert.deepEqual(manualPaymentActions('in_review', 'admin', true), ['approve', 'reject']);
+assert.deepEqual(manualPaymentActions('in_review', 'admin', false), ['reject']);
 assert.equal(validatePaymentProof(null), 'Seleccioná un comprobante.');
 ```
 
