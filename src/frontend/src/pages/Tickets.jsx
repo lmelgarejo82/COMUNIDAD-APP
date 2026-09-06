@@ -467,6 +467,7 @@ export default function Tickets() {
   const [detailSaving, setDetailSaving] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const panel = useRef(null);
+  const ticketWork = useRef(new Map());
   const readVersion = useRef(0);
   const mounted = useRef(true);
   const [msg, setMsg] = useState('');
@@ -553,12 +554,12 @@ export default function Tickets() {
       const { data } = await ticketService.get(owner.id);
       if (!isCurrentPanel(owner) || version !== readVersion.current) return;
       owner.ready = true;
-      owner.committed = false;
+      if (!owner.work.operation) owner.work.saved = null;
       setSelected(data);
       setTickets(prev => prev.map(row => row.id === data.id ? { ...row, ...data } : row));
     } catch (err) {
       if (!isCurrentPanel(owner) || version !== readVersion.current) return;
-      setDetailError(committed || owner.committed
+      setDetailError(committed || owner.work.saved
         ? 'El cambio se guardó, pero no se pudo actualizar el historial. Reintentá la lectura antes de continuar.'
         : getErrorMessage(err, 'No se pudo cargar el historial. Reintentá antes de continuar.'));
     } finally {
@@ -572,38 +573,47 @@ export default function Tickets() {
 
   async function mutateDetail(kind, value) {
     const owner = panel.current;
-    if (!owner?.ready || owner.operation) return;
+    if (!owner?.ready || owner.work.operation || owner.work.saved) return;
+    const work = owner.work;
     const operation = {};
-    owner.operation = operation;
+    work.operation = operation;
+    work.message = '';
     setDetailSaving(true);
     setDetailMsg('');
     try {
       const { data } = kind === 'reply'
         ? await ticketService.addReply(owner.id, value)
         : await ticketService.updateStatus(owner.id, value);
-      if (!isCurrentPanel(owner)) return;
-      owner.committed = true;
-      owner.ready = false;
-      if (kind === 'reply') {
-        setReplyMsg('');
-        setSelected(prev => ({ ...prev, replies: [...(prev.replies || []).filter(row => row.id !== data.id), data] }));
-        setDetailMsg('Actualización agregada');
-      } else {
-        setSelected(prev => ({ ...prev, ...data, replies: prev.replies }));
-        setTickets(prev => prev.map(row => row.id === owner.id ? { ...row, ...data } : row));
-        setDetailMsg('Estado actualizado');
-      }
-      owner.operation = null;
+      if (!mounted.current || work.operation !== operation) return;
+      work.saved = { kind, data };
+      work.message = kind === 'reply' ? 'Actualización agregada' : 'Estado actualizado';
+      work.operation = null;
+      const current = panel.current;
+      if (current?.id !== owner.id) return;
+      current.ready = false;
+      if (kind === 'reply') setReplyMsg('');
+      setSelected(prev => applySaved(prev, work.saved));
+      if (kind === 'status') setTickets(prev => prev.map(row => row.id === owner.id ? { ...row, ...data } : row));
+      setDetailMsg(work.message);
       setDetailSaving(false);
-      await readDetail(owner, { committed: true });
+      await readDetail(current, { committed: true });
     } catch (err) {
-      if (isCurrentPanel(owner)) setDetailMsg(getErrorMessage(err, kind === 'reply' ? 'Error al responder' : 'Error al actualizar estado'));
+      if (!mounted.current || work.operation !== operation) return;
+      work.message = getErrorMessage(err, kind === 'reply' ? 'Error al responder' : 'Error al actualizar estado');
+      if (panel.current?.id === owner.id) setDetailMsg(work.message);
     } finally {
-      if (isCurrentPanel(owner) && owner.operation === operation) {
-        owner.operation = null;
-        setDetailSaving(false);
+      if (mounted.current && work.operation === operation) {
+        work.operation = null;
+        if (panel.current?.id === owner.id) setDetailSaving(false);
       }
     }
+  }
+
+  function applySaved(ticket, saved) {
+    if (!saved) return ticket;
+    return saved.kind === 'reply'
+      ? { ...ticket, replies: [...(ticket.replies || []).filter(row => row.id !== saved.data.id), saved.data] }
+      : { ...ticket, ...saved.data, replies: ticket.replies };
   }
 
   function handleStatusChange(ticketId, status) {
@@ -645,11 +655,17 @@ export default function Tickets() {
   }
 
   function openTicket(ticket) {
-    const owner = { id: ticket.id, ready: false, operation: null, committed: false, retrying: false };
+    // A panel is disposable; pending writes and saved readback belong to the record.
+    let work = ticketWork.current.get(ticket.id);
+    if (!work) {
+      work = { operation: null, saved: null, message: '' };
+      ticketWork.current.set(ticket.id, work);
+    }
+    const owner = { id: ticket.id, ready: false, work, retrying: false };
     panel.current = owner;
-    setSelected(ticket);
-    setDetailSaving(false);
-    setDetailMsg('');
+    setSelected(applySaved(ticket, work.saved));
+    setDetailSaving(Boolean(work.operation));
+    setDetailMsg(work.message);
     setReplyMsg('');
     setMsg('');
     setError('');

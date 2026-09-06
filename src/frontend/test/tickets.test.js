@@ -96,3 +96,73 @@ test('old failed status cannot replace another ticket feedback or clear its pend
   a.reject(new Error('old status error')); await first; h.render(); assert.doesNotMatch(content(detail(h)), /old status error/); assert.equal(button(h, 'Cerrado').props.disabled, true);
   b.resolve({ data: record(2, 'closed') }); await second;
 });
+
+for (const kind of ['reply', 'status']) {
+  for (const outcome of ['success', 'failure', 'readback failure']) test(`same-ticket reopen retains pending ${kind} through late ${outcome}`, async () => {
+    const pending = deferred(); let reads = 0, writes = 0, committed = false;
+    const h = await page({
+      get: async () => {
+        reads++;
+        if (committed && outcome === 'readback failure' && reads === 3) throw new Error('offline');
+        return { data: record(1, committed ? (kind === 'reply' ? 'in_progress' : 'resolved') : 'sent', committed && kind === 'reply' ? [reply] : []) };
+      },
+      addReply: () => { writes++; return pending.promise; },
+      updateStatus: () => { writes++; return pending.promise; },
+    });
+    h.select(); await h.settle(); edit(h, reply.message);
+    const first = kind === 'reply' ? submit(h) : button(h, 'Resuelto').props.onClick(); h.render();
+    h.close(); h.select(); await h.settle(); edit(h, reply.message);
+    assert.equal(reads, 2, 'replacement GET returned the precommit record');
+    assert.equal(button(h, 'Resuelto').props.disabled, true, 'same record still owns its pending write');
+    assert.equal(button(h, 'Agregar nota').props.disabled, true);
+    await submit(h); await button(h, 'Resuelto').props.onClick();
+    assert.equal(writes, 1, 'handlers also reject duplicate pending writes');
+    if (outcome === 'failure') pending.reject(new Error('Current mutation failed'));
+    else { committed = true; pending.resolve({ data: kind === 'reply' ? reply : record(1, 'resolved') }); }
+    await first; await h.settle();
+    if (outcome === 'failure') {
+      assert.match(content(detail(h)), kind === 'reply' ? /Error al responder/ : /Error al actualizar estado/);
+      assert.equal(button(h, 'Resuelto').props.disabled, false);
+      assert.equal(nodes(all(h), n => n?.type === 'textarea')[0].props.value, reply.message);
+    } else {
+      assert.equal(reads, 3, 'old-panel commit triggers current same-record readback');
+      assert.match(content(detail(h)), kind === 'reply' ? /Respuesta guardada/ : /Estado actual: Resuelto/);
+      if (outcome === 'readback failure') {
+        assert.match(content(detail(h)), /El cambio se guardó/);
+        assert.equal(button(h, 'Resuelto').props.disabled, true);
+        if (kind === 'reply') assert.ok(nodes(detail(h), n => n?.type === 'span' && content(n) === 'Abierto').length, 'reply-only response cannot infer status');
+        await button(h, 'Reintentar historial').props.onClick(); h.render();
+      }
+      assert.equal(button(h, 'Resuelto').props.disabled, false);
+      assert.match(content(detail(h)), kind === 'reply' ? /Estado actual: En proceso/ : /Estado actual: Resuelto/);
+    }
+    assert.equal(writes, 1);
+  });
+}
+
+test('reopened same-ticket reconciliation retry owns loading over both earlier reads', async () => {
+  const pending = deferred(), precommit = deferred(), readback = deferred(); let reads = 0;
+  const h = await page({ get: () => {
+    reads++;
+    return reads === 2 ? precommit.promise : reads === 3 ? readback.promise : Promise.resolve({ data: record(1, reads >= 4 ? 'resolved' : 'sent') });
+  }, updateStatus: () => pending.promise });
+  h.select(); await h.settle(); const first = button(h, 'Resuelto').props.onClick(); h.render();
+  h.close(); h.select(); pending.resolve({ data: record(1, 'resolved') }); await h.settle();
+  assert.equal(reads, 3, 'commit launches a fresh current-panel read');
+  await button(h, 'Reintentar historial').props.onClick(); h.render();
+  assert.equal(reads, 4); assert.equal(button(h, 'Resuelto').props.disabled, false);
+  precommit.resolve({ data: record() }); readback.resolve({ data: record() }); await first; await h.settle();
+  assert.match(content(detail(h)), /Estado actual: Resuelto/); assert.doesNotMatch(text(h), /Cargando historial/);
+});
+
+test('another ticket remains independent while a closed ticket commits and later reopens', async () => {
+  const pending = deferred(), otherRead = deferred(); let firstReads = 0;
+  const h = await page({ get: id => id === 2 ? otherRead.promise : ++firstReads === 1 ? Promise.resolve({ data: record() }) : Promise.reject(new Error('offline')), updateStatus: () => pending.promise });
+  h.select(); await h.settle(); const first = button(h, 'Resuelto').props.onClick(); h.render(); h.select(2);
+  pending.resolve({ data: record(1, 'resolved') }); await first; h.render();
+  assert.match(content(detail(h)), /Cargando historial/); assert.doesNotMatch(content(detail(h)), /Estado actualizado/);
+  otherRead.resolve({ data: record(2) }); await h.settle(); assert.equal(button(h, 'Resuelto').props.disabled, false);
+  h.select(1); await h.settle();
+  assert.match(content(detail(h)), /Estado actual: Resuelto/); assert.match(content(detail(h)), /El cambio se guardó/);
+  assert.equal(button(h, 'Resuelto').props.disabled, true);
+});
