@@ -11,7 +11,10 @@ test('public invitation metadata and resident announcements use safe database re
   assert.equal(started.status === 0, true, 'isolated PostgreSQL must start');
   let pool;
   t.after(async () => { await pool?.end(); assert.equal(docker(['rm', '-f', name]).status === 0, true, 'isolated PostgreSQL cleaned'); });
-  const port = docker(['inspect', '--format', '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}', name]).stdout.trim();
+  const inspected = docker(['inspect', '--format', '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}', name]);
+  assert.equal(inspected.status === 0, true, 'isolated PostgreSQL port inspection must succeed');
+  const port = String(inspected.stdout ?? '').trim();
+  assert.equal(/^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535, true, 'isolated PostgreSQL must expose a valid TCP port');
   pool = new Pool({ host: '127.0.0.1', port: Number(port), user: 'postgres', database: 'postgres' });
   let ready = false;
   for (let attempt = 0; attempt < 100; attempt++) {
