@@ -156,7 +156,7 @@ export default function Layout() {
           )}
           {!isMobile && (
             <>
-              <strong>{user?.email}</strong>
+              <strong style={styles.email} title={user?.email}>{user?.email}</strong>
               <span style={styles.roleBadge}>{user?.role === 'access_operator' ? 'Guardia' : user?.role}</span>
             </>
           )}
@@ -228,6 +228,7 @@ export default function Layout() {
 const styles = {
   header: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    gap: '0.75rem',
     padding: '0 1.2rem', height: '52px',
     background: '#0F3B5E', color: '#FFFFFF',
     position: 'relative', zIndex: 99,
@@ -241,9 +242,10 @@ const styles = {
     position: 'fixed', top: '52px', left: 0, right: 0, bottom: 0,
     background: '#FFFFFF', zIndex: 98, overflowY: 'auto', paddingBottom: '4rem',
   },
-  nav: { display: 'flex', gap: '0.2rem', alignItems: 'center' },
+  nav: { display: 'flex', gap: '0.2rem', alignItems: 'center', minWidth: 0, flex: 1 },
   main: { paddingBottom: '96px' },
-  user: { display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', color: '#FFFFFF' },
+  user: { display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', color: '#FFFFFF', flexShrink: 0 },
+  email: { minWidth: 0, maxWidth: '140px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   roleBadge: { padding: '0.1rem 0.5rem', background: 'rgba(255,255,255,0.15)', borderRadius: '4px', fontSize: '0.68rem', textTransform: 'uppercase', color: '#FFFFFF' },
   logoutBtn: { padding: '0.35rem 0.8rem', background: 'transparent', color: '#E74C3C', border: '1px solid #E74C3C', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 },
   notifWrap: { position: 'relative', cursor: 'pointer', marginRight: '0.25rem' },

@@ -100,7 +100,7 @@ export default function ScopeSelector({
         style={{
           ...styles.trigger,
           ...(isDark ? styles.triggerDark : styles.triggerLight),
-          width: compact ? '100%' : undefined,
+          width: '100%',
         }}
         title={scopePath}
       >
