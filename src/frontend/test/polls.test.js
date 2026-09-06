@@ -59,3 +59,54 @@ test('tenant and admin never load or render the owner voting widget', async () =
     assert.equal(h.tree(), null); assert.equal(reads, 0);
   }
 });
+
+test('another poll failing to vote cannot strand a successful pending readback', async () => {
+  const readback = deferred(), secondVote = deferred(); let reads = 0;
+  const other = { ...poll(), id: 9, title: 'Jardín', options: ['Plantar', 'Conservar'] };
+  const h = await widget({
+    get: () => ++reads === 1 ? Promise.resolve({ data: [poll(), other] }) : readback.promise,
+    post: path => path.includes('/8/') ? Promise.resolve({ data: {} }) : secondVote.promise,
+  });
+  const first = button(h, 'Reparar').props.onClick(); await h.settle();
+  assert.match(content(h.tree()), /Resultados pendientes/);
+  const second = button(h, 'Plantar').props.onClick();
+  secondVote.reject(new Error('offline')); await second; await h.settle();
+  readback.resolve({ data: [poll(true), other] }); await first; await h.settle();
+  assert.match(content(h.tree()), /100%/);
+  assert.doesNotMatch(content(h.tree()), /Resultados pendientes|Cargando votaciones/);
+  assert.equal(button(h, 'Reparar'), undefined);
+  assert.equal(button(h, 'Plantar').props.disabled, false);
+});
+
+test('failed vote settlement cannot clear another polls current read loading', async () => {
+  const readback = deferred(), secondVote = deferred(); let reads = 0;
+  const other = { ...poll(), id: 9, options: ['Plantar'] };
+  const h = await widget({
+    get: () => ++reads === 1 ? Promise.resolve({ data: [poll(), other] }) : readback.promise,
+    post: path => path.includes('/8/') ? Promise.resolve({ data: {} }) : secondVote.promise,
+  });
+  const first = button(h, 'Reparar').props.onClick(); await h.settle();
+  const second = button(h, 'Plantar').props.onClick();
+  secondVote.reject(new Error('offline')); await second; await h.settle();
+  assert.match(content(h.tree()), /Cargando votaciones/);
+  readback.reject(new Error('read offline')); await first; await h.settle();
+  assert.doesNotMatch(content(h.tree()), /Cargando votaciones/);
+  assert.ok(button(h, 'Reintentar votaciones'));
+});
+
+test('superseded successful vote readback cannot release the current read loading', async () => {
+  const firstRead = deferred(), currentRead = deferred(); let reads = 0;
+  const other = voted => ({ ...poll(voted), id: 9, title: 'Jardín', options: ['Plantar'] });
+  const h = await widget({ get: () => {
+    if (++reads === 1) return Promise.resolve({ data: [poll(), other(false)] });
+    return reads === 2 ? firstRead.promise : currentRead.promise;
+  } });
+  const first = button(h, 'Reparar').props.onClick(); await h.settle();
+  const second = button(h, 'Plantar').props.onClick(); await h.settle();
+  firstRead.resolve({ data: [poll(true), other(false)] }); await first; await h.settle();
+  assert.match(content(h.tree()), /Cargando votaciones/);
+  assert.equal(button(h, 'Plantar'), undefined);
+  currentRead.resolve({ data: [poll(true), other(true)] }); await second; await h.settle();
+  assert.doesNotMatch(content(h.tree()), /Cargando votaciones|Resultados pendientes/);
+  assert.equal((content(h.tree()).match(/100%/g) || []).length, 2);
+});

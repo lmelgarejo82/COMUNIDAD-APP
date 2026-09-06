@@ -44,7 +44,6 @@ export default function PollsWidget() {
   async function handleVote(pollId, optionIndex) {
     if (!eligible || operations.current.has(pollId) || committed.current.has(pollId)) return;
     operations.current.add(pollId);
-    reads.current += 1;
     setBusy(prev => ({ ...prev, [pollId]: true }));
     setMsg('');
     try {
@@ -59,7 +58,7 @@ export default function PollsWidget() {
       if (alive.current) setMsg(err.response?.data?.error || 'Error al votar');
     } finally {
       operations.current.delete(pollId);
-      if (alive.current) { setBusy(prev => ({ ...prev, [pollId]: false })); setLoading(false); }
+      if (alive.current) setBusy(prev => ({ ...prev, [pollId]: false }));
     }
   }
 
