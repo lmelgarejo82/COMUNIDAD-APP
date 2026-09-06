@@ -1,6 +1,8 @@
-# Controlled pilot readiness — 2026-09-05
+# Controlled pilot readiness — 2026-09-06
 
-This records verified behavior, not a production certification. Account lifecycle, manual payments, supported interfaces and the fresh full-pilot journey have evidence below. Final integrated review and publication are separate gates; their status must not be inferred from a successful endpoint or test count.
+**READY FOR CONTROLLED PILOT — GO WITH OBSERVATIONS.** Account lifecycle, manual payments, supported interfaces and the fresh full-pilot journey are complete. This is not production certification. Actual pilot SMTP delivery remains unvalidated and must be configured before email-dependent real users onboard.
+
+Final integrated review of `1ad6e3b..512e609` covered all 57 commits, including the original 14: zero Critical, zero Important, one existing nonblocking LF/CRLF tooling advisory. The fresh merged-main gate on 2026-09-06 passed: backend 396/397 (zero failures, one opt-in PostgreSQL skip separately covered by the real database gates below), frontend 126/126, production build and diff checks. Docker health and the invitation SPA returned 200; served entry/access assets matched the merged-main build. Final read-only checks again found zero captured QA rows/markers, only the original upload hash, and unchanged 20 paid/10 pending/0 proofs. No new feature or repeated full E2E journey was added during closeout; the evidence boundaries below remain explicit.
 
 ## Account lifecycle gate
 
@@ -75,13 +77,15 @@ Primary fixtures were removed by captured IDs across 27 tables; all four run mar
 
 Task review found a two-poll race: starting a second vote invalidated the first vote's useful readback, and either vote could incorrectly clear the newer read's loading state. Three actual-component RED failures preceded the two-line ownership correction in `c0c0d8a`: only the generation-guarded read owns read generation/loading. Poll tests passed 10/10; fresh scoped re-review closed the finding with no new issue. No backend policy or new authenticated journey is claimed for that deferred-response fix.
 
-Independent regression at `c0c0d8a`: backend **396 passed, 0 failed, 1 opt-in PostgreSQL case skipped** of 397, including real isolated Redis; frontend **126 passed, 0 failed**, production build 626 modules, diff checks successful. Separate current-backend Docker PostgreSQL gates passed manual-payment 10/10 and booking 201/409 overlap, 200/409 status race, genuine 23503 rollback and foreign 404. Their exact fixtures were removed. Final integrated whole-branch review and normal publication remain pending at this evidence commit.
+Independent regression at `c0c0d8a`: backend **396 passed, 0 failed, 1 opt-in PostgreSQL case skipped** of 397, including real isolated Redis; frontend **126 passed, 0 failed**, production build 626 modules, diff checks successful. Separate current-backend Docker PostgreSQL gates passed manual-payment 10/10 and booking 201/409 overlap, 200/409 status race, genuine 23503 rollback and foreign 404. Their exact fixtures were removed. Final integrated review and the fresh merged-main gate subsequently passed, as recorded above.
 
 ## External SMTP gate
 
 **NO VALIDADO — EXTERNAL CREDENTIAL REQUIRED.** Account email behavior was verified through ephemeral Mailpit, not the real pilot provider. Deployment remains env-driven through `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER`, `EMAIL_PASS` and trusted `PUBLIC_APP_URL`. Do not put credentials in this document, committed files or logs. Real-provider receipt of invitation and recovery messages is required before claiming full SMTP validation.
 
-Account code publication can be **GO WITH OBSERVATIONS** for this external dependency. Manual-proof payment evidence is recorded separately above; neither block establishes whole-pilot readiness or validates optional MercadoPago, AI or automatic WhatsApp providers.
+Controlled-pilot code publication is **GO WITH OBSERVATIONS** for this external dependency. Optional MercadoPago, AI and automatic WhatsApp remain unconfigured/gated, not provider-certified; manual proof is the validated payment path.
+
+Not required before this controlled pilot: SLA, ticket assignment, resident visitor invitations, automatic WhatsApp, AI, master-ticket UI, poll administration UI, advanced analytics or full payment automation. Production operations still require an appropriate HTTPS/network deployment, durable secret management, backup/restore procedures and trusted initial provisioning. The local Docker database/Redis published ports are not a production exposure policy. No new dependency was introduced; migration 032 is the sole new migration in this completion chain. Routine line-ending advisory cleanup remains nonblocking tooling maintenance.
 
 ## Safe provision and inspection for a fresh pilot
 
