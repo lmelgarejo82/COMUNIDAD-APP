@@ -11,7 +11,7 @@ const visitTypes = [
 
 export default function AccessFilters({ filters, onChange, onClear }) {
   return (
-    <div style={{ ...t.card, padding: '0.75rem', display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) 150px auto', gap: '0.55rem', alignItems: 'center' }}>
+    <div style={{ ...t.card, padding: '0.75rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: '0.55rem', alignItems: 'center', minWidth: 0 }}>
       <input
         value={filters.search || ''}
         onChange={(e) => onChange({ ...filters, search: e.target.value })}
