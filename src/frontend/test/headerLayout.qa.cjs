@@ -21,7 +21,7 @@ const { build } = require('esbuild');
   const browser = await require(process.argv[2]).chromium.launch({ executablePath: process.argv[3], headless: true });
   try {
     const errors = [];
-    for (const width of [1366, 390]) {
+    for (const width of [1366, 800, 390]) {
       const page = await browser.newPage({ viewport: { width, height: 900 } });
       page.on('pageerror', e => errors.push(e.message));
       page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
@@ -43,14 +43,14 @@ const { build } = require('esbuild');
         const a = geometry.controls[i].rect, b = geometry.controls[j].rect;
         assert.ok(Math.min(a.right, b.right) - Math.max(a.x, b.x) <= 1 || Math.min(a.bottom, b.bottom) - Math.max(a.y, b.y) <= 1, 'Header controls must not overlap');
       }
-      if (width === 390) await page.getByRole('button', { name: '☰', exact: true }).click();
+      if (width < 1024) await page.getByRole('button', { name: '☰', exact: true }).click();
       for (const link of await page.getByRole('link').all()) {
         const reachable = await link.evaluate(e => { const r = e.getBoundingClientRect(); return r.x >= 0 && r.right <= innerWidth && e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); });
         assert.ok(reachable, 'Navigation link remains reachable');
       }
       await page.getByRole('link', { name: 'Expensas', exact: true }).click();
-      if (width === 1366) await page.waitForFunction(() => document.querySelector('a[href="/expensas"]').style.fontWeight === '700');
-      if (width === 390) await page.getByRole('button', { name: '☰', exact: true }).click();
+      if (width >= 1024) await page.waitForFunction(() => document.querySelector('a[href="/expensas"]').style.fontWeight === '700');
+      if (width < 1024) await page.getByRole('button', { name: '☰', exact: true }).click();
       await page.getByRole('button', { name: /Alcance/ }).click();
       await page.getByPlaceholder('Buscar organización, comunidad o complejo').waitFor();
       await page.getByRole('button', { name: 'b36qa-2fd1d8cb97886ac6-complejo Complejo', exact: true }).click();

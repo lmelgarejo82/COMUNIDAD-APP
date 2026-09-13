@@ -36,7 +36,9 @@ export default function Layout() {
 
   const isAdmin = user?.role === 'admin';
   const isAccessOperator = user?.role === 'access_operator';
-  const isMobile = width < 640;
+  // The complete admin navigation needs desktop-width room; use the compact
+  // menu on tablets as well so header controls never overlap.
+  const isMobile = width < 1024;
   const showManualSupport = !isAccessOperator && !menuOpen && !notifOpen;
   const showAiSupport = width >= 768 && showManualSupport && capabilities.aiAssistant;
 
