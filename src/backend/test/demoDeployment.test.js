@@ -55,6 +55,12 @@ test('demo compose isolates state and publishes only the frontend on loopback', 
   assert.match(compose, /PUBLIC_REGISTRATION_ENABLED:\s*['"]false['"]/);
   assert.match(compose, /DEMO_ENV:\s*['"]true['"]/);
   assert.match(compose, /healthcheck:/g);
+  assert.match(compose, /demo-bootstrap\.sql:\/docker-entrypoint-initdb\.d\/00-demo-bootstrap\.sql:ro/);
+
+  const bootstrap = fs.readFileSync(path.join(repoRoot, 'deploy', 'demo', 'demo-bootstrap.sql'), 'utf8');
+  assert.match(bootstrap, /migration-bootstrap@example\.invalid/);
+  assert.match(bootstrap, /ON CONFLICT \(email\) DO NOTHING/);
+  assert.doesNotMatch(bootstrap, /admin123|tavalink\.com\.py/);
 });
 
 test('backend entrypoint waits for the configured database rather than development constants', () => {

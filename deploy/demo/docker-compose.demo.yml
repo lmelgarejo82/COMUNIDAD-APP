@@ -8,6 +8,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tavalink_demo}
     volumes:
       - postgres_data:/var/lib/postgresql
+      - ./demo-bootstrap.sql:/docker-entrypoint-initdb.d/00-demo-bootstrap.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
