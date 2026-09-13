@@ -55,6 +55,8 @@ test('demo compose isolates state and publishes only the frontend on loopback', 
   assert.match(compose, /PUBLIC_REGISTRATION_ENABLED:\s*['"]false['"]/);
   assert.match(compose, /DEMO_ENV:\s*['"]true['"]/);
   assert.match(compose, /healthcheck:/g);
+  assert.match(compose, /backend:[\s\S]*edge:\s*\n\s+ipv4_address: 172\.31\.10\.3/);
+  assert.match(compose, /frontend:[\s\S]*edge:\s*\n\s+ipv4_address: 172\.31\.10\.2/);
   assert.match(compose, /demo-bootstrap\.sql:\/docker-entrypoint-initdb\.d\/00-demo-bootstrap\.sql:ro/);
 
   const bootstrap = fs.readFileSync(path.join(repoRoot, 'deploy', 'demo', 'demo-bootstrap.sql'), 'utf8');

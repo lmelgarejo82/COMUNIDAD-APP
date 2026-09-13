@@ -79,7 +79,10 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
-    networks: [data, edge]
+    networks:
+      data:
+      edge:
+        ipv4_address: 172.31.10.3
 
   frontend:
     build:
