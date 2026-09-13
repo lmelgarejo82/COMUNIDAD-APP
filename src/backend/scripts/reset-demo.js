@@ -10,13 +10,6 @@ const DEMO_EMAILS = Object.freeze({
   guard: 'demo.guardia@tavalink.com.py',
   access: 'demo.accesos@tavalink.com.py',
 });
-const DEMO_RESET_EMAILS = Object.freeze([
-  ...Object.values(DEMO_EMAILS),
-  'migration-bootstrap@example.invalid',
-  'sofia.vera@example.invalid',
-  'martin.rojas@example.invalid',
-  'ana.gimenez@example.invalid',
-]);
 
 function assertDemoTarget(env = process.env) {
   if (env.DEMO_ENV !== 'true') throw new Error('ABORT: DEMO_ENV=true is required');
@@ -84,10 +77,24 @@ async function resetDemo(client, credentials, uploadDir) {
 
   await client.query('BEGIN');
   try {
-    await client.query('DELETE FROM communities WHERE access_code IN ($1, $2)', [DEMO_ACCESS_CODE, 'DEMO2024']);
-    await client.query('DELETE FROM users WHERE email = ANY($1::text[])', [DEMO_RESET_EMAILS]);
-    await client.query(`DELETE FROM organizations o WHERE o.name IN ('Residencial Los Lapachos', 'Comunidad Demo')
-      AND NOT EXISTS (SELECT 1 FROM communities c WHERE c.organization_id = o.id)`);
+    // Capture membership before ON DELETE SET NULL detaches users/complexes.
+    // Emails and names are never sufficient authority to delete another tenant.
+    const { rows: targets } = await client.query(
+      'SELECT id, organization_id FROM communities WHERE access_code IN ($1, $2) FOR UPDATE',
+      [DEMO_ACCESS_CODE, 'DEMO2024']
+    );
+    const communityIds = targets.map(row => row.id);
+    const organizationIds = targets.map(row => row.organization_id).filter(Boolean);
+    const { rows: identities } = await client.query('SELECT id FROM users WHERE community_id = ANY($1::int[])', [communityIds]);
+    const { rows: hierarchy } = await client.query('SELECT id FROM complexes WHERE community_id = ANY($1::int[])', [communityIds]);
+    // Remove community-owned expenses before their NOT NULL creators; then
+    // explicitly remove the hierarchy and captured identities, including any
+    // records created during prospect sessions.
+    await client.query('DELETE FROM communities WHERE id = ANY($1::int[])', [communityIds]);
+    await client.query('DELETE FROM complexes WHERE id = ANY($1::int[])', [hierarchy.map(row => row.id)]);
+    await client.query('DELETE FROM users WHERE id = ANY($1::int[])', [identities.map(row => row.id)]);
+    await client.query(`DELETE FROM organizations o WHERE o.id = ANY($1::int[])
+      AND NOT EXISTS (SELECT 1 FROM communities c WHERE c.organization_id = o.id)`, [organizationIds]);
 
     const { rows: [organization] } = await client.query(
       'INSERT INTO organizations (name, legal_name) VALUES ($1, $2) RETURNING id',
@@ -226,10 +233,9 @@ async function resetDemo(client, credentials, uploadDir) {
        VALUES ($1, 'Reglamento de convivencia', 'Documento ficticio para la presentación.', $2, $3)`,
       [community.id, `/uploads/${documentFile}`, admin.id]
     );
-    await client.query('COMMIT');
-
     await fs.mkdir(uploadDir, { recursive: true });
     await fs.writeFile(path.join(uploadDir, documentFile), createDemoPdf());
+    await client.query('COMMIT');
     return { communityId: community.id, users: DEMO_EMAILS };
   } catch (error) {
     await client.query('ROLLBACK');
