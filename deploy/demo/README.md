@@ -31,13 +31,10 @@ PostgreSQL y Redis no publican puertos. El frontend se publica sólo en `127.0.0
 El reset aborta salvo que el contenedor tenga `DEMO_ENV=true` y el nombre de la base incluya `demo`. Borra únicamente comunidades con los access codes reservados de demo y vuelve a crear `Residencial Los Lapachos`.
 
 ```sh
-set -a
-. ./DEMO-CREDENTIALS.txt
-set +a
-docker compose --env-file .env -p tavalink-demo -f deploy/demo/docker-compose.demo.yml exec \
-  -e DEMO_ADMIN_PASSWORD -e DEMO_RESIDENT_PASSWORD -e DEMO_GUARD_PASSWORD -e DEMO_ACCESS_PASSWORD \
-  backend npm run db:reset-demo
-unset DEMO_ADMIN_PASSWORD DEMO_RESIDENT_PASSWORD DEMO_GUARD_PASSWORD DEMO_ACCESS_PASSWORD
+sudo docker compose --env-file .env -p tavalink-demo -f deploy/demo/docker-compose.demo.yml \
+  cp DEMO-CREDENTIALS.txt backend:/tmp/tavalink-demo-credentials
+sudo docker compose --env-file .env -p tavalink-demo -f deploy/demo/docker-compose.demo.yml \
+  exec backend sh -c 'set -a; . /tmp/tavalink-demo-credentials; set +a; npm run db:reset-demo; status=$?; rm -f /tmp/tavalink-demo-credentials; exit $status'
 ```
 
 ## Nginx y TLS
