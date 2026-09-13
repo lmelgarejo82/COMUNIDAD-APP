@@ -21,7 +21,7 @@ Rama de trabajo: `feat/tavalink-demo-deployment`
 - El Compose de desarrollo expone PostgreSQL y Redis públicamente y usa credenciales fijas; no es apto para demo.
 - El backend ya valida secretos, origen público y proxy; `/api/health` existe y proyecta capacidades sin secretos.
 - Las capacidades de Mercado Pago, DeepSeek y Twilio fallan cerradas si sus variables están vacías.
-- SMTP puede producir correo real si recibe credenciales. Los recordatorios cron escriben notificaciones internas. Bull puede generar subtickets y WhatsApp si se configura.
+- SMTP puede producir correo real si recibe credenciales. Los recordatorios cron escriben notificaciones internas. Bull genera subtickets internos y sólo intenta WhatsApp si se configura; en demo conservará la cola con Redis aislado y WhatsApp deshabilitado.
 - El autorregistro público ya se controla con `PUBLIC_REGISTRATION_ENABLED=false`; los flujos por invitación continúan disponibles.
 - El producto tiene tres roles técnicos: `admin`, `residente` y `access_operator`. La UI presenta `access_operator` como “Guardia”. Para las dos identidades solicitadas de guardia y operador se crearán usuarios separados con el rol técnico `access_operator`.
 - El seed actual es destructivo para toda la base, usa credenciales públicas y datos genéricos; no se reutilizará para la demo.
