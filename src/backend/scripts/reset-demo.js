@@ -181,9 +181,9 @@ async function resetDemo(client, credentials, uploadDir) {
       await client.query(
         `INSERT INTO unit_expenses
          (expense_id, unit_number, unit_id, amount_owed, fixed_part, extra_part, status, paid_at, confirmed_at)
-         VALUES ($1, $2, $3, 450000, 400000, 50000, $4,
-          CASE WHEN $4 = 'paid' THEN NOW() - INTERVAL '2 days' END,
-          CASE WHEN $4 = 'paid' THEN NOW() - INTERVAL '2 days' END)`,
+         VALUES ($1, $2, $3, 450000, 400000, 50000, $4::varchar,
+          CASE WHEN $4::varchar = 'paid' THEN NOW() - INTERVAL '2 days' END,
+          CASE WHEN $4::varchar = 'paid' THEN NOW() - INTERVAL '2 days' END)`,
         [expense.id, units[index].unit_code, units[index].id, paid ? 'paid' : 'pending']
       );
     }
