@@ -27,7 +27,9 @@ test('demo proxy preserves sanitized host client identity and TLS scheme but ign
     assert.equal(docker(['cp', path.join(dir, 'default.conf'), `${name}:/etc/nginx/conf.d/default.conf`]).status, 0);
     const result = docker(['start', '-a', name]);
     assert.equal(result.status, 0, result.stderr);
-    const lines = result.stdout.split('\n').filter(s => s.startsWith('{')).map(s => JSON.parse(s));
+    // Docker can interleave Nginx access-log lines with curl's response output.
+    // Extract complete synthetic response records, not newline boundaries.
+    const lines = (result.stdout.match(/\{"ip":"[^"]*","real":"[^"]*","proto":"[^"]*"\}/g) || []).map(s => JSON.parse(s));
     assert.deepEqual(lines, [
       ...Array.from({ length: 3 }, () => ({ ip: '198.51.100.10', real: '198.51.100.10', proto: 'https' })),
       { ip: '198.51.100.11', real: '198.51.100.11', proto: 'https' },

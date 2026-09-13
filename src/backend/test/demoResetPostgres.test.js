@@ -38,7 +38,7 @@ test('demo reset removes complete demo hierarchy and prospect identities but pre
     await client.query("INSERT INTO complexes(name,community_id) VALUES('Prospect-created complex',$1)", [first.communityId]);
     await resetDemo(client, credentials, uploads);
     const counts = (await client.query('SELECT (SELECT count(*) FROM communities)::int AS communities, (SELECT count(*) FROM complexes)::int AS complexes, (SELECT count(*) FROM buildings)::int AS buildings, (SELECT count(*) FROM floors)::int AS floors, (SELECT count(*) FROM units)::int AS units, (SELECT count(*) FROM users)::int AS users')).rows[0];
-    assert.deepEqual(counts, { communities: 2, complexes: 2, buildings: 1, floors: 3, units: 6, users: 8 });
+    assert.deepEqual(counts, { communities: 2, complexes: 2, buildings: 1, floors: 3, units: 6, users: 10 });
     assert.equal((await client.query("SELECT count(*)::int AS n FROM users WHERE email='prospect@example.invalid'")).rows[0].n, 0);
     assert.equal((await client.query('SELECT count(*)::int AS n FROM users WHERE community_id=$1', [foreign])).rows[0].n, 1);
     assert.ok((await fs.stat(path.join(uploads, '1726000000000-reglamento-demo.pdf'))).size > 0);

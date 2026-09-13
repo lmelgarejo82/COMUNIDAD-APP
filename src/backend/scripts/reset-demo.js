@@ -153,6 +153,8 @@ async function resetDemo(client, credentials, uploadDir) {
     await createUser('sofia.vera@example.invalid', unusableHash, 'residente', units[1], 'tenant');
     await createUser('martin.rojas@example.invalid', unusableHash, 'residente', units[2]);
     await createUser('ana.gimenez@example.invalid', unusableHash, 'residente', units[3]);
+    await createUser('lucia.benitez@example.invalid', unusableHash, 'residente', units[4]);
+    await createUser('diego.acosta@example.invalid', unusableHash, 'residente', units[5]);
     await client.query('INSERT INTO admin_complexes (user_id, complex_id) VALUES ($1, $2)', [admin.id, complex.id]);
 
     await client.query(
