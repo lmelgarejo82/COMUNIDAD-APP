@@ -10,6 +10,13 @@ const DEMO_EMAILS = Object.freeze({
   guard: 'demo.guardia@tavalink.com.py',
   access: 'demo.accesos@tavalink.com.py',
 });
+const DEMO_RESET_EMAILS = Object.freeze([
+  ...Object.values(DEMO_EMAILS),
+  'migration-bootstrap@example.invalid',
+  'sofia.vera@example.invalid',
+  'martin.rojas@example.invalid',
+  'ana.gimenez@example.invalid',
+]);
 
 function assertDemoTarget(env = process.env) {
   if (env.DEMO_ENV !== 'true') throw new Error('ABORT: DEMO_ENV=true is required');
@@ -77,6 +84,7 @@ async function resetDemo(client, credentials, uploadDir) {
 
   await client.query('BEGIN');
   try {
+    await client.query('DELETE FROM users WHERE email = ANY($1::text[])', [DEMO_RESET_EMAILS]);
     await client.query('DELETE FROM communities WHERE access_code IN ($1, $2)', [DEMO_ACCESS_CODE, 'DEMO2024']);
     await client.query(`DELETE FROM organizations o WHERE o.name IN ('Residencial Los Lapachos', 'Comunidad Demo')
       AND NOT EXISTS (SELECT 1 FROM communities c WHERE c.organization_id = o.id)`);

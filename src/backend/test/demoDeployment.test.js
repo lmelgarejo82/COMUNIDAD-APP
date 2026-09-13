@@ -36,6 +36,7 @@ test('demo reset requires all four passwords without embedding a default credent
 
   const source = fs.readFileSync(path.join(backendRoot, 'scripts', 'reset-demo.js'), 'utf8');
   assert.doesNotMatch(source, /admin123|password\s*[:=]\s*['"][^'"]+['"]/i);
+  assert.match(source, /DELETE FROM users WHERE email = ANY\(\$1::text\[\]\)/);
 
   const pdf = createDemoPdf();
   assert.equal(pdf.subarray(0, 8).toString('ascii'), '%PDF-1.4');
