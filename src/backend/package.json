@@ -6,6 +6,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "db:migrate": "node scripts/migrate.js",
+    "db:reset-demo": "node scripts/reset-demo.js",
     "test": "node --require ./test/setupEnvironment.js --test test/*.test.js"
   },
   "dependencies": {

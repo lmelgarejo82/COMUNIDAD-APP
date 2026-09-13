@@ -1,0 +1,120 @@
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-tavalink_demo}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [data]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [data]
+
+  backend:
+    build:
+      context: ../../src/backend
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-tavalink_demo}
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      PGDATABASE: ${POSTGRES_DB:-tavalink_demo}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      INVITATION_TOKEN_SECRET: ${INVITATION_TOKEN_SECRET:?Set INVITATION_TOKEN_SECRET}
+      JWT_EXPIRES_IN: 8h
+      PUBLIC_APP_URL: https://demo.tavalink.com.py
+      TRUST_PROXY_IP: "172.31.10.2"
+      PUBLIC_REGISTRATION_ENABLED: "false"
+      SEED_DB: "false"
+      DEMO_ENV: "true"
+      QUEUE_ENABLED: "true"
+      REDIS_URL: redis://redis:6379
+      RATE_LIMIT_WINDOW_MS: "900000"
+      RATE_LIMIT_MAX: "1000"
+      AUTH_RATE_LIMIT_MAX: "20"
+      UPLOAD_DIR: /app/uploads
+      EMAIL_HOST: 127.0.0.1
+      EMAIL_PORT: "1"
+      EMAIL_USER: ""
+      EMAIL_PASS: ""
+      MP_ACCESS_TOKEN: ""
+      MP_WEBHOOK_URL: ""
+      DEEPSEEK_API_KEY: ""
+      TWILIO_ACCOUNT_SID: ""
+      TWILIO_AUTH_TOKEN: ""
+      TWILIO_WHATSAPP_NUMBER: ""
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose: ["3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [data, edge]
+
+  frontend:
+    build:
+      context: ../../src/frontend
+      dockerfile: Dockerfile.demo
+      args:
+        VITE_PUBLIC_REGISTRATION_ENABLED: "false"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DEMO_HTTP_PORT:-18080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    networks:
+      edge:
+        ipv4_address: 172.31.10.2
+
+volumes:
+  postgres_data:
+    name: tavalink-demo-postgres
+  redis_data:
+    name: tavalink-demo-redis
+  uploads_data:
+    name: tavalink-demo-uploads
+
+networks:
+  data:
+    name: tavalink-demo-data
+    internal: true
+  edge:
+    name: tavalink-demo-edge
+    ipam:
+      config:
+        - subnet: 172.31.10.0/24

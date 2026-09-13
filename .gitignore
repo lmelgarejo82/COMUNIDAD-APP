@@ -5,3 +5,6 @@ uploads/*
 !uploads/.gitkeep
 *.log
 .worktrees/
+.qa/tavalink-demo-access
+.qa/tavalink-demo-access.pub
+DEMO-CREDENTIALS.txt
